@@ -1,73 +1,91 @@
-from pydantic import BaseModel,Field
-from typing import List, Optional, Dict,Any,Literal
-
-class ErrorResponse(BaseModel):
-    status: Literal["error"]
-    reason : str = Field(...,max_length= 256)
-    class Config:
-        extra="forbid"
-
-class TestCase(BaseModel):
-    input: Dict[str,Any]
-    expected_output: Optional[Any]=None
-    class Config:
-        extra="forbid"
-
-class ExecuteRequest(BaseModel):
-    problem_id:Optional[str] = Field(None, max_length=20000)
-    language:Literal[
-              "python",
-              "javascript",
-              "c",
-              "java",
-              "kotlin",
-              "go",
-              "rust",
-              "typescript",
-              "cpp",
-              "csharp",
-            ]
-    function_name: str = Field(...,min_length=1,max_length=64)
-    code: str = Field(...,min_length=1,max_length=5000)
-    test_cases: List[TestCase] = Field(..., min_items=1, max_items=20)
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Literal, Union
 
 
+# -------------------------
+# Base Config (Strict Mode)
+# -------------------------
+
+class StrictBaseModel(BaseModel):
     class Config:
         extra = "forbid"
 
-class Result(BaseModel):
+
+# -------------------------
+# Test Case Model
+# -------------------------
+
+class TestCase(StrictBaseModel):
     input: Dict[str, Any]
-    expected_output: Optional[Any]
-    actual_output: Optional[Any]
-    passed: bool
-
-    class Config:
-        extra = "forbid"
+    expected_output: Any
 
 
-class Response(BaseModel):
-    status: Literal["completed","failed"]
-    results: List[Result]
-    stdout: Optional[str] = Field(None, max_length=1000)
-    stderr: Optional[str] = Field(None, max_length=1000)
+# -------------------------
+# Execute Request Model
+# -------------------------
 
-    class Config:
-        extra = "forbid"
-
-class SubmitRequest(BaseModel):
-    problem_id: Optional[str] = Field(None, max_length=64)
+class ExecuteRequest(StrictBaseModel):
     language: Literal[
-        "python", "javascript", "c", "java", "kotlin",
-        "go", "rust", "typescript", "cpp", "csharp"
+        "python",
+        "javascript",
+        "c",
+        "java",
+        "kotlin",
+        "go",
+        "rust",
+        "typescript",
+        "cpp",
+        "csharp",
     ]
 
-    function_name: str = Field(
+    source_code: str = Field(..., min_length=1, max_length=5000)
+
+    function_name: str = Field(..., min_length=1, max_length=100)
+
+    test_cases: List[TestCase] = Field(
         ...,
-        min_length=1,
-        max_length=64,
+        min_items=1,
+        max_items=20
     )
 
-    code: str = Field(..., min_length=1, max_length=5000)
 
-    class Config:
-        extra = "forbid"
+# -------------------------
+# Response Models
+# -------------------------
+
+class AcceptedResponse(StrictBaseModel):
+    verdict: Literal["accepted"]
+
+
+class WrongAnswerResponse(StrictBaseModel):
+    verdict: Literal["wrong_answer"]
+    failed_test_case_index: int = Field(..., ge=0)
+
+
+class RuntimeErrorResponse(StrictBaseModel):
+    verdict: Literal["runtime_error"]
+    failed_test_case_index: int = Field(..., ge=0)
+    error_message: str = Field(..., max_length=1000)
+
+
+class CompilationErrorResponse(StrictBaseModel):
+    verdict: Literal["compilation_error"]
+    error_message: str = Field(..., max_length=1000)
+
+class TimeoutResponse(StrictBaseModel):
+    verdict: Literal["timeout"]
+    failed_test_case_index: int = Field(..., ge=0)
+
+
+
+# -------------------------
+# Unified Response Type
+# -------------------------
+
+ExecuteResponse = Union[
+    AcceptedResponse,
+    WrongAnswerResponse,
+    RuntimeErrorResponse,
+    CompilationErrorResponse,
+    TimeoutResponse
+]

@@ -1,0 +1,42 @@
+EXECUTE_REQUEST_PAYLOAD={
+  "language": "python",
+  "source_code": "...",
+  "function_name": "twoSum",
+  "test_cases": [
+    {
+      "input": {
+        "nums": [3, 2, 4],
+        "target": 6
+      },
+      "expected_output": [1, 2]
+    },
+    {
+      "input": {
+        "nums": [2, 7, 11, 15],
+        "target": 9
+      },
+      "expected_output": [0, 1]
+    }
+  ]
+}
+
+
+RESPONSE_PAYLOAD_ACCEPTED={
+  "verdict": "accepted"
+}
+
+WRONG_ANSWER_FAILED_A_TEST_CASE={
+  "verdict": "wrong_answer",
+  "failed_test_case_index": 1
+}
+
+RUNTIME_ERROR={
+  "verdict": "runtime_error",
+  "failed_test_case_index": 0,
+  "error_message": "IndexError: ..."
+}
+
+COMPILATION_ERROR={
+  "verdict": "compilation_error",
+  "error_message": "SyntaxError: ..."
+}

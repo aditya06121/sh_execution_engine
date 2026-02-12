@@ -1,0 +1,18 @@
+# Time limits (seconds)
+EXECUTION_TIMEOUT_SECONDS = 5
+
+# Docker resource limits
+DOCKER_MEMORY_LIMIT = "256m"
+DOCKER_MEMORY_SWAP = "256m"
+DOCKER_CPU_LIMIT = "0.5"
+DOCKER_PIDS_LIMIT = "64"
+DOCKER_NOFILE_LIMIT = "64"
+
+# Output limits
+MAX_STDOUT_BYTES = 1_000_000  # 1 MB
+
+# Container behavior
+CONTAINER_SLEEP_SECONDS = 60
+
+# Concurrency
+MAX_CONCURRENT_EXECUTIONS = 5
