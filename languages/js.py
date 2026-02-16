@@ -20,12 +20,13 @@ from config.limits import (
     MAX_STDOUT_BYTES,
     CONTAINER_SLEEP_SECONDS,
 )
-from .python_wrapper import PYTHON_WRAPPER_TEMPLATE
 
-class PythonExecutor(BaseExecutor):
-#TODO: write custom wrapper
-    IMAGE_NAME = "python-sandbox:latest"
+from .js_wrapper import JS_WRAPPER_TEMPLATE
 
+
+class JavaScriptExecutor(BaseExecutor):
+
+    IMAGE_NAME = "js-sandbox:latest"
 
     def __init__(self, code: str, function_name: str):
         super().__init__(code, function_name)
@@ -35,19 +36,10 @@ class PythonExecutor(BaseExecutor):
         self.file_path = None
 
     # -------------------------
-    # Compile Phase
+    # Compile Phase (JS has no compilation)
     # -------------------------
 
     def compile(self):
-
-        # 1️⃣ Syntax validation
-
-        #  for linux replace the sandbox logic with this 
-
-        try:
-            compile(self.code, "<string>", "exec")
-        except SyntaxError as e:
-            raise CompileError(str(e))
 
         container_sandbox_root = "/sandbox"
         host_sandbox_root = os.environ.get("HOST_SANDBOX_ROOT")
@@ -55,27 +47,22 @@ class PythonExecutor(BaseExecutor):
         if not host_sandbox_root:
             raise RuntimeExecutionError("HOST_SANDBOX_ROOT not set")
 
-        # 2️⃣ Create temp directory inside container sandbox
+        # Create temp directory
         self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
-
-        # Extract folder name only
         folder_name = os.path.basename(self.temp_dir)
-
-        # Construct real host path manually
         self.host_temp_dir = os.path.join(host_sandbox_root, folder_name)
 
-        # 3️⃣ Write wrapped code
-        self.file_path = os.path.join(self.temp_dir, "main.py")
+        # Write wrapped JS file
+        self.file_path = os.path.join(self.temp_dir, "main.js")
 
-        wrapped_code = PYTHON_WRAPPER_TEMPLATE.replace(
-    "{source_code}", self.code
-)
-
+        wrapped_code = JS_WRAPPER_TEMPLATE.replace(
+            "{source_code}", self.code
+        )
 
         with open(self.file_path, "w") as f:
             f.write(wrapped_code)
 
-        # 4️⃣ Start execution container (IMPORTANT: use host path)
+        # Start sandbox container
         run_cmd = [
             "docker", "run",
             "-d",
@@ -121,7 +108,7 @@ class PythonExecutor(BaseExecutor):
             "docker", "exec",
             "-i",
             self.container_id,
-            "python3", "main.py"
+            "node", "main.js"
         ]
 
         try:
@@ -135,7 +122,7 @@ class PythonExecutor(BaseExecutor):
         except subprocess.TimeoutExpired:
             raise RuntimeExecutionError("Execution timed out")
 
-        # Output limit enforcement
+        # Enforce stdout size limit
         if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 

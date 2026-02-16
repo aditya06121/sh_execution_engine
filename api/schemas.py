@@ -27,13 +27,13 @@ class TestCase(StrictBaseModel):
 class ExecuteRequest(StrictBaseModel):
     language: Literal[
         "python",
-        "javascript",
+        "js",
         "c",
         "java",
         "kotlin",
         "go",
         "rust",
-        "typescript",
+        "ts",
         "cpp",
         "csharp",
     ]
@@ -60,6 +60,8 @@ class AcceptedResponse(StrictBaseModel):
 class WrongAnswerResponse(StrictBaseModel):
     verdict: Literal["wrong_answer"]
     failed_test_case_index: int = Field(..., ge=0)
+    actual_output: Any
+    expected_output: Any
 
 
 class RuntimeErrorResponse(StrictBaseModel):

@@ -44,6 +44,7 @@ class ExecutionPipeline:
                     return {
                         "verdict": "wrong_answer",
                         "failed_test_case_index": index,
+                        "actual_output": output,                     "expected_output": tc["expected_output"],
                     }
 
             return {
