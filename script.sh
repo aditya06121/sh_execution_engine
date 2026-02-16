@@ -3,4 +3,5 @@ docker run \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(pwd)/sandbox:/sandbox \
   -e HOST_SANDBOX_ROOT=$(pwd)/sandbox \
+  --name judge-api \
   judge-api

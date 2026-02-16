@@ -23,13 +23,14 @@ from config.limits import (
 
 
 class PythonExecutor(BaseExecutor):
-
-    IMAGE_NAME = "judge-exec"
+#TODO: write custom wrapper
+    IMAGE_NAME = "python:3.11-slim"
 
     PYTHON_WRAPPER_TEMPLATE = """
 import sys
 import json
 import traceback
+import inspect
 from collections import deque
 
 # ==============================
@@ -42,10 +43,18 @@ class TreeNode:
         self.left = left
         self.right = right
 
+
 class ListNode:
     def __init__(self, val=0, next=None):
         self.val = val
         self.next = next
+
+
+class Node:
+    def __init__(self, val=0, neighbors=None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+
 
 # ==============================
 # Helper Builders
@@ -55,14 +64,9 @@ def build_tree(values):
     if not values:
         return None
 
-    nodes = []
-    for val in values:
-        if val is None:
-            nodes.append(None)
-        else:
-            nodes.append(TreeNode(val))
-
+    nodes = [TreeNode(val) if val is not None else None for val in values]
     kids = deque(nodes[1:])
+
     for node in nodes:
         if node:
             if kids:
@@ -71,6 +75,7 @@ def build_tree(values):
                 node.right = kids.popleft()
 
     return nodes[0]
+
 
 def tree_to_list(root):
     if not root:
@@ -88,27 +93,82 @@ def tree_to_list(root):
         else:
             result.append(None)
 
-    # Trim trailing nulls
     while result and result[-1] is None:
         result.pop()
 
     return result
 
+
 def build_linked_list(values):
     if not values:
         return None
+
     dummy = ListNode(0)
     curr = dummy
+
     for val in values:
         curr.next = ListNode(val)
         curr = curr.next
+
     return dummy.next
+
 
 def linked_list_to_list(head):
     result = []
+
     while head:
         result.append(head.val)
         head = head.next
+
+    return result
+
+
+# ==============================
+# Graph Support
+# ==============================
+
+def build_graph(adjList):
+    if not adjList:
+        return None
+
+    nodes = {i + 1: Node(i + 1) for i in range(len(adjList))}
+
+    for i, neighbors in enumerate(adjList):
+        for neighbor in neighbors:
+            nodes[i + 1].neighbors.append(nodes[neighbor])
+
+    return nodes[1]
+
+
+def graph_to_adjlist(node):
+    if not node:
+        return []
+
+    visited = set()
+    queue = deque([node])
+    nodes = []
+
+    while queue:
+        curr = queue.popleft()
+        if curr in visited:
+            continue
+
+        visited.add(curr)
+        nodes.append(curr)
+
+        for neighbor in curr.neighbors:
+            if neighbor not in visited:
+                queue.append(neighbor)
+
+    nodes.sort(key=lambda x: x.val)
+
+    max_val = max(n.val for n in nodes)
+    result = [[] for _ in range(max_val)]
+
+    for curr in nodes:
+        for neighbor in curr.neighbors:
+            result[curr.val - 1].append(neighbor.val)
+
     return result
 
 
@@ -125,15 +185,17 @@ def linked_list_to_list(head):
 
 def auto_convert_inputs(test_input):
     converted = {}
+
     for key, value in test_input.items():
 
-        # Tree detection
         if isinstance(value, list) and key.lower().startswith("root"):
             converted[key] = build_tree(value)
 
-        # LinkedList detection
         elif isinstance(value, list) and key.lower().startswith("head"):
             converted[key] = build_linked_list(value)
+
+        elif isinstance(value, list) and key.lower().startswith("adj"):
+            converted[key] = build_graph(value)
 
         else:
             converted[key] = value
@@ -142,13 +204,32 @@ def auto_convert_inputs(test_input):
 
 
 def auto_convert_output(result):
+
     if isinstance(result, TreeNode):
         return tree_to_list(result)
 
     if isinstance(result, ListNode):
         return linked_list_to_list(result)
 
+    if isinstance(result, Node):
+        return graph_to_adjlist(result)
+
     return result
+
+
+def call_function(func, converted_input):
+
+    try:
+        sig = inspect.signature(func)
+        param_count = len(sig.parameters)
+
+        if param_count == len(converted_input):
+            return func(*converted_input.values())
+
+        return func(**converted_input)
+
+    except TypeError:
+        return func(**converted_input)
 
 
 def execute_function(function_name, test_input):
@@ -157,7 +238,8 @@ def execute_function(function_name, test_input):
 
     # Top-level function
     if function_name in globals() and callable(globals()[function_name]):
-        result = globals()[function_name](**converted_input)
+        func = globals()[function_name]
+        result = call_function(func, converted_input)
         return auto_convert_output(result)
 
     # Class-based Solution
@@ -166,7 +248,7 @@ def execute_function(function_name, test_input):
 
         if hasattr(solution_instance, function_name):
             method = getattr(solution_instance, function_name)
-            result = method(**converted_input)
+            result = call_function(method, converted_input)
             return auto_convert_output(result)
 
     raise Exception(f"Function '{function_name}' not found")
@@ -194,6 +276,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 """
 
 
