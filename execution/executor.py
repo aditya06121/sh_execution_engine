@@ -1,5 +1,6 @@
 from languages.python import PythonExecutor
 from languages.js import JavaScriptExecutor
+from languages.ts import TypeScriptExecutor
 
 class ExecutorFactory:
 
@@ -7,7 +8,8 @@ class ExecutorFactory:
 
     _registry = {
         "python": PythonExecutor,
-        "js": JavaScriptExecutor
+        "js": JavaScriptExecutor,
+        "ts": TypeScriptExecutor
     }
 
     @staticmethod
