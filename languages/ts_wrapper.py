@@ -30,7 +30,6 @@ class ListNode {
     }
 }
 
-// Renamed to avoid DOM Node conflict
 class GraphNode {
     val: number;
     neighbors: GraphNode[];
@@ -87,29 +86,35 @@ function treeToList(root: TreeNode | null): (number | null)[] {
 }
 
 // ==============================
-// Linked List Helpers
+// Linked List Helpers (Cycle Safe)
 // ==============================
 
-function buildLinkedList(values: number[]): ListNode | null {
-    if (!values || values.length === 0) return null;
+function buildLinkedList(values: number[]): { head: ListNode | null, nodes: ListNode[] } {
+    if (!values || values.length === 0) return { head: null, nodes: [] };
 
     const dummy = new ListNode(0);
     let curr: ListNode = dummy;
+    const nodes: ListNode[] = [];
 
     for (const val of values) {
         curr.next = new ListNode(val);
         curr = curr.next;
+        nodes.push(curr);
     }
 
-    return dummy.next;
+    return { head: dummy.next, nodes };
 }
 
 function linkedListToArray(head: ListNode | null): number[] {
     const result: number[] = [];
-    while (head) {
+    const visited = new Set<ListNode>();
+
+    while (head && !visited.has(head)) {
+        visited.add(head);
         result.push(head.val);
         head = head.next;
     }
+
     return result;
 }
 
@@ -173,7 +178,7 @@ function graphToAdjList(node: GraphNode | null): number[][] {
 {source_code}
 
 // ==============================
-// Auto Conversion
+// Auto Conversion (Cycle Support Added)
 // ==============================
 
 function autoConvertInput(input: Record<string, any>): Record<string, any> {
@@ -182,13 +187,36 @@ function autoConvertInput(input: Record<string, any>): Record<string, any> {
     for (const key in input) {
         const value = input[key];
 
+        // Tree
         if (Array.isArray(value) && key.toLowerCase().startsWith("root")) {
             converted[key] = buildTree(value);
-        } else if (Array.isArray(value) && key.toLowerCase().startsWith("head")) {
-            converted[key] = buildLinkedList(value);
-        } else if (Array.isArray(value) && key.toLowerCase().startsWith("adj")) {
+        }
+
+        // Linked List with optional pos
+        else if (Array.isArray(value) && key.toLowerCase().startsWith("head")) {
+
+            const pos = typeof input.pos === "number" ? input.pos : -1;
+
+            const { head, nodes } = buildLinkedList(value);
+
+            if (pos !== -1 && nodes.length > 0 && pos >= 0 && pos < nodes.length) {
+                nodes[nodes.length - 1].next = nodes[pos];
+            }
+
+            converted[key] = head;
+        }
+
+        // Graph
+        else if (Array.isArray(value) && key.toLowerCase().startsWith("adj")) {
             converted[key] = buildGraph(value);
-        } else {
+        }
+
+        // Skip metadata like pos
+        else if (key === "pos") {
+            continue;
+        }
+
+        else {
             converted[key] = value;
         }
     }
@@ -211,7 +239,6 @@ function executeFunction(functionName: string, input: Record<string, any>): any 
 
     const convertedInput = autoConvertInput(input);
 
-    // Try free function via eval
     try {
         const func = eval(functionName);
         if (typeof func === "function") {
@@ -220,7 +247,6 @@ function executeFunction(functionName: string, input: Record<string, any>): any 
         }
     } catch (_) {}
 
-    // Try class Solution
     try {
         const SolutionClass = eval("Solution");
         if (typeof SolutionClass === "function") {
@@ -234,7 +260,6 @@ function executeFunction(functionName: string, input: Record<string, any>): any 
 
     throw new Error("Function '" + functionName + "' not found");
 }
-
 
 // ==============================
 // Main

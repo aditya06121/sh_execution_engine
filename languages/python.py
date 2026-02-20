@@ -9,6 +9,10 @@ from execution.exceptions import (
     CompileError,
     RuntimeExecutionError,
 )
+from execution.sandbox_paths import (
+    build_host_temp_dir,
+    get_sandbox_roots,
+)
 
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
@@ -49,20 +53,12 @@ class PythonExecutor(BaseExecutor):
         except SyntaxError as e:
             raise CompileError(str(e))
 
-        container_sandbox_root = "/sandbox"
-        host_sandbox_root = os.environ.get("HOST_SANDBOX_ROOT")
-
-        if not host_sandbox_root:
-            raise RuntimeExecutionError("HOST_SANDBOX_ROOT not set")
+        container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
         # 2️⃣ Create temp directory inside container sandbox
         self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
 
-        # Extract folder name only
-        folder_name = os.path.basename(self.temp_dir)
-
-        # Construct real host path manually
-        self.host_temp_dir = os.path.join(host_sandbox_root, folder_name)
+        self.host_temp_dir = build_host_temp_dir(host_sandbox_root, self.temp_dir)
 
         # 3️⃣ Write wrapped code
         self.file_path = os.path.join(self.temp_dir, "main.py")

@@ -73,22 +73,26 @@ def tree_to_list(root):
 
 def build_linked_list(values):
     if not values:
-        return None
+        return None, []
 
     dummy = ListNode(0)
     curr = dummy
+    nodes = []
 
     for val in values:
         curr.next = ListNode(val)
         curr = curr.next
+        nodes.append(curr)
 
-    return dummy.next
+    return dummy.next, nodes
 
 
 def linked_list_to_list(head):
     result = []
+    visited = set()
 
-    while head:
+    while head and head not in visited:
+        visited.add(head)
         result.append(head.val)
         head = head.next
 
@@ -160,14 +164,31 @@ def auto_convert_inputs(test_input):
 
     for key, value in test_input.items():
 
+        # ----- Tree -----
         if isinstance(value, list) and key.lower().startswith("root"):
             converted[key] = build_tree(value)
 
+        # ----- Linked List (with optional pos) -----
         elif isinstance(value, list) and key.lower().startswith("head"):
-            converted[key] = build_linked_list(value)
 
+            pos = test_input.get("pos", -1)
+
+            head, nodes = build_linked_list(value)
+
+            # Create cycle if pos is valid
+            if pos != -1 and nodes:
+                if 0 <= pos < len(nodes):
+                    nodes[-1].next = nodes[pos]
+
+            converted[key] = head
+
+        # ----- Graph -----
         elif isinstance(value, list) and key.lower().startswith("adj"):
             converted[key] = build_graph(value)
+
+        # ----- Skip metadata -----
+        elif key == "pos":
+            continue
 
         else:
             converted[key] = value

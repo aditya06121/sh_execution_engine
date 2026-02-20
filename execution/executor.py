@@ -1,6 +1,8 @@
 from languages.python import PythonExecutor
 from languages.js import JavaScriptExecutor
 from languages.ts import TypeScriptExecutor
+from languages.java import JavaExecutor
+from languages.kotlin import KotlinExecutor
 
 class ExecutorFactory:
 
@@ -9,7 +11,9 @@ class ExecutorFactory:
     _registry = {
         "python": PythonExecutor,
         "js": JavaScriptExecutor,
-        "ts": TypeScriptExecutor
+        "ts": TypeScriptExecutor,
+        "java": JavaExecutor,
+        "kotlin": KotlinExecutor
     }
 
     @staticmethod

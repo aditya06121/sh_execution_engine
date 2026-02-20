@@ -71,29 +71,35 @@ function treeToList(root) {
 }
 
 // ==============================
-// Linked List Helpers
+// Linked List Helpers (Cycle Safe)
 // ==============================
 
 function buildLinkedList(values) {
-    if (!values || values.length === 0) return null;
+    if (!values || values.length === 0) return { head: null, nodes: [] };
 
     const dummy = new ListNode(0);
     let curr = dummy;
+    const nodes = [];
 
     for (const val of values) {
         curr.next = new ListNode(val);
         curr = curr.next;
+        nodes.push(curr);
     }
 
-    return dummy.next;
+    return { head: dummy.next, nodes };
 }
 
 function linkedListToArray(head) {
     const result = [];
-    while (head) {
+    const visited = new Set();
+
+    while (head && !visited.has(head)) {
+        visited.add(head);
         result.push(head.val);
         head = head.next;
     }
+
     return result;
 }
 
@@ -157,7 +163,7 @@ function graphToAdjList(node) {
 {source_code}
 
 // ==============================
-// Auto Conversion
+// Auto Conversion (Cycle Support Added)
 // ==============================
 
 function autoConvertInput(input) {
@@ -166,13 +172,36 @@ function autoConvertInput(input) {
     for (const key in input) {
         const value = input[key];
 
+        // Tree
         if (Array.isArray(value) && key.toLowerCase().startsWith("root")) {
             converted[key] = buildTree(value);
-        } else if (Array.isArray(value) && key.toLowerCase().startsWith("head")) {
-            converted[key] = buildLinkedList(value);
-        } else if (Array.isArray(value) && key.toLowerCase().startsWith("adj")) {
+        }
+
+        // Linked List with optional pos
+        else if (Array.isArray(value) && key.toLowerCase().startsWith("head")) {
+
+            const pos = typeof input.pos === "number" ? input.pos : -1;
+
+            const { head, nodes } = buildLinkedList(value);
+
+            if (pos !== -1 && nodes.length > 0 && pos >= 0 && pos < nodes.length) {
+                nodes[nodes.length - 1].next = nodes[pos];
+            }
+
+            converted[key] = head;
+        }
+
+        // Graph
+        else if (Array.isArray(value) && key.toLowerCase().startsWith("adj")) {
             converted[key] = buildGraph(value);
-        } else {
+        }
+
+        // Skip metadata like pos
+        else if (key === "pos") {
+            continue;
+        }
+
+        else {
             converted[key] = value;
         }
     }
@@ -195,7 +224,6 @@ function executeFunction(functionName, input) {
 
     const convertedInput = autoConvertInput(input);
 
-    // Try free function
     try {
         const func = eval(functionName);
         if (typeof func === "function") {
@@ -204,7 +232,6 @@ function executeFunction(functionName, input) {
         }
     } catch (e) {}
 
-    // Try class Solution
     if (typeof Solution === "function") {
         const instance = new Solution();
         if (typeof instance[functionName] === "function") {
