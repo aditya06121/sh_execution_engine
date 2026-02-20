@@ -2,7 +2,7 @@ JAVA_WRAPPER_TEMPLATE = r"""
 import java.io.*;
 import java.lang.reflect.*;
 import java.util.*;
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 // ==============================
@@ -25,15 +25,147 @@ class ListNode {
 class Node {
     public int val;
     public List<Node> neighbors;
+    Node(int val) {
+        this.val = val;
+        this.neighbors = new ArrayList<>();
+    }
+}
 
-    public Node() {
-        val = 0;
-        neighbors = new ArrayList<>();
+// ==============================
+// Helper Builders
+// ==============================
+
+class Builders {
+
+    public static TreeNode buildTree(List<Integer> values) {
+        if (values == null || values.isEmpty()) return null;
+
+        List<TreeNode> nodes = new ArrayList<>();
+        for (Integer val : values)
+            nodes.add(val == null ? null : new TreeNode(val));
+
+        Queue<TreeNode> queue = new LinkedList<>();
+        TreeNode root = nodes.get(0);
+        queue.offer(root);
+
+        int i = 1;
+        while (!queue.isEmpty() && i < nodes.size()) {
+            TreeNode current = queue.poll();
+            if (current != null) {
+                current.left = nodes.get(i++);
+                if (i < nodes.size())
+                    current.right = nodes.get(i++);
+                queue.offer(current.left);
+                queue.offer(current.right);
+            }
+        }
+
+        return root;
     }
 
-    public Node(int _val) {
-        val = _val;
-        neighbors = new ArrayList<>();
+    public static List<Integer> treeToList(TreeNode root) {
+        if (root == null) return new ArrayList<>();
+
+        List<Integer> result = new ArrayList<>();
+        Queue<TreeNode> queue = new LinkedList<>();
+        queue.offer(root);
+
+        while (!queue.isEmpty()) {
+            TreeNode node = queue.poll();
+            if (node != null) {
+                result.add(node.val);
+                queue.offer(node.left);
+                queue.offer(node.right);
+            } else {
+                result.add(null);
+            }
+        }
+
+        while (!result.isEmpty() && result.get(result.size() - 1) == null)
+            result.remove(result.size() - 1);
+
+        return result;
+    }
+
+    public static ListNode buildLinkedList(List<Integer> values, int pos) {
+        if (values == null || values.isEmpty()) return null;
+
+        ListNode dummy = new ListNode(0);
+        ListNode curr = dummy;
+        List<ListNode> nodes = new ArrayList<>();
+
+        for (Integer val : values) {
+            curr.next = new ListNode(val);
+            curr = curr.next;
+            nodes.add(curr);
+        }
+
+        if (pos != -1 && pos < nodes.size())
+            curr.next = nodes.get(pos);
+
+        return dummy.next;
+    }
+
+    public static List<Integer> linkedListToList(ListNode head) {
+        List<Integer> result = new ArrayList<>();
+        Set<ListNode> visited = new HashSet<>();
+
+        while (head != null && !visited.contains(head)) {
+            visited.add(head);
+            result.add(head.val);
+            head = head.next;
+        }
+
+        return result;
+    }
+
+    public static Node buildGraph(List<List<Integer>> adjList) {
+        if (adjList == null || adjList.isEmpty()) return null;
+
+        Map<Integer, Node> nodes = new HashMap<>();
+        for (int i = 0; i < adjList.size(); i++)
+            nodes.put(i + 1, new Node(i + 1));
+
+        for (int i = 0; i < adjList.size(); i++)
+            for (Integer neighbor : adjList.get(i))
+                nodes.get(i + 1).neighbors.add(nodes.get(neighbor));
+
+        return nodes.get(1);
+    }
+
+    public static List<List<Integer>> graphToAdjList(Node node) {
+        if (node == null) return new ArrayList<>();
+
+        List<Node> nodes = new ArrayList<>();
+        Queue<Node> queue = new LinkedList<>();
+        Set<Node> visited = new HashSet<>();
+
+        queue.offer(node);
+
+        while (!queue.isEmpty()) {
+            Node curr = queue.poll();
+            if (visited.contains(curr)) continue;
+
+            visited.add(curr);
+            nodes.add(curr);
+
+            for (Node neighbor : curr.neighbors)
+                if (!visited.contains(neighbor))
+                    queue.offer(neighbor);
+        }
+
+        nodes.sort(Comparator.comparingInt(n -> n.val));
+
+        int maxVal = nodes.stream().mapToInt(n -> n.val).max().orElse(0);
+        List<List<Integer>> result = new ArrayList<>();
+        for (int i = 0; i < maxVal; i++)
+            result.add(new ArrayList<>());
+
+        for (Node curr : nodes)
+            for (Node neighbor : curr.neighbors)
+                result.get(curr.val - 1).add(neighbor.val);
+
+        return result;
     }
 }
 
@@ -41,7 +173,7 @@ class Node {
 // User Code
 // ==============================
 
-{USER_CODE}
+{source_code}
 
 // ==============================
 // Execution Engine
@@ -51,219 +183,141 @@ public class Main {
 
     static ObjectMapper mapper = new ObjectMapper();
 
-    // ------------------------------
-    // Deep Normalize List Results
-    // ------------------------------
-    static Object normalize(Object obj) {
+    public static Object autoConvertOutput(Object result) {
 
-        if (obj instanceof List) {
-            List<?> list = (List<?>) obj;
-            List<Object> normalized = new ArrayList<>();
+        if (result instanceof TreeNode)
+            return Builders.treeToList((TreeNode) result);
 
-            for (Object item : list)
-                normalized.add(normalize(item));
+        if (result instanceof ListNode)
+            return Builders.linkedListToList((ListNode) result);
 
-            // if list of lists of integers → sort inner lists
-            if (!normalized.isEmpty() && normalized.get(0) instanceof List) {
+        if (result instanceof Node)
+            return Builders.graphToAdjList((Node) result);
 
-                for (Object inner : normalized)
-                    Collections.sort((List<?>) inner);
-
-                normalized.sort((a, b) -> {
-                    List<Integer> l1 = (List<Integer>) a;
-                    List<Integer> l2 = (List<Integer>) b;
-                    for (int i = 0; i < Math.min(l1.size(), l2.size()); i++) {
-                        if (!l1.get(i).equals(l2.get(i)))
-                            return l1.get(i) - l2.get(i);
-                    }
-                    return l1.size() - l2.size();
-                });
-            }
-
-            return normalized;
-        }
-
-        return obj;
+        return result;
     }
 
-    // ------------------------------
-    // Tree Builder
-    // ------------------------------
-    static TreeNode buildTree(List<Integer> values) {
-        if (values == null || values.isEmpty() || values.get(0) == null)
+    public static Object convertValue(Object value, Class<?> targetType, Map<String,Object> fullInput) {
+
+        if (value == null)
             return null;
 
-        TreeNode root = new TreeNode(values.get(0));
-        Queue<TreeNode> queue = new LinkedList<>();
-        queue.add(root);
+        if (targetType == int.class || targetType == Integer.class)
+            return ((Number) value).intValue();
 
-        int i = 1;
+        if (targetType == long.class || targetType == Long.class)
+            return ((Number) value).longValue();
 
-        while (!queue.isEmpty() && i < values.size()) {
-            TreeNode node = queue.poll();
+        if (targetType == double.class || targetType == Double.class)
+            return ((Number) value).doubleValue();
 
-            if (i < values.size() && values.get(i) != null) {
-                node.left = new TreeNode(values.get(i));
-                queue.add(node.left);
-            }
-            i++;
+        if (targetType == boolean.class || targetType == Boolean.class)
+            return value;
 
-            if (i < values.size() && values.get(i) != null) {
-                node.right = new TreeNode(values.get(i));
-                queue.add(node.right);
-            }
-            i++;
+        if (targetType == String.class)
+            return value.toString();
+
+        if (targetType == int[].class) {
+            List<?> list = (List<?>) value;
+            int[] arr = new int[list.size()];
+            for (int i = 0; i < list.size(); i++)
+                arr[i] = ((Number) list.get(i)).intValue();
+            return arr;
         }
 
-        return root;
+        if (targetType == int[][].class) {
+            List<?> outer = (List<?>) value;
+            int[][] arr = new int[outer.size()][];
+            for (int i = 0; i < outer.size(); i++) {
+                List<?> inner = (List<?>) outer.get(i);
+                arr[i] = new int[inner.size()];
+                for (int j = 0; j < inner.size(); j++)
+                    arr[i][j] = ((Number) inner.get(j)).intValue();
+            }
+            return arr;
+        }
+
+        if (targetType == TreeNode.class)
+            return Builders.buildTree((List<Integer>) value);
+
+        if (targetType == ListNode.class) {
+            int pos = -1;
+            if (fullInput.containsKey("pos"))
+                pos = ((Number) fullInput.get("pos")).intValue();
+            return Builders.buildLinkedList((List<Integer>) value, pos);
+        }
+
+        if (targetType == Node.class)
+            return Builders.buildGraph((List<List<Integer>>) value);
+
+        return value;
     }
 
-    // ------------------------------
-    // Linked List Builder
-    // ------------------------------
-    static ListNode buildList(List<Integer> values, Integer pos) {
+    public static Object executeFunction(String functionName, Map<String, Object> input) throws Exception {
 
-        if (values == null || values.isEmpty())
-            return null;
+        try {
+            Class<?> solutionClass = Class.forName("Solution");
+            Object instance = solutionClass.getDeclaredConstructor().newInstance();
 
-        ListNode head = new ListNode(values.get(0));
-        ListNode curr = head;
+            for (Method method : solutionClass.getDeclaredMethods()) {
 
-        List<ListNode> nodes = new ArrayList<>();
-        nodes.add(head);
+                if (!method.getName().equals(functionName))
+                    continue;
 
-        for (int i = 1; i < values.size(); i++) {
-            curr.next = new ListNode(values.get(i));
-            curr = curr.next;
-            nodes.add(curr);
-        }
+                Class<?>[] paramTypes = method.getParameterTypes();
+                Object[] args = new Object[paramTypes.length];
 
-        if (pos != null && pos >= 0 && pos < nodes.size())
-            curr.next = nodes.get(pos);
+                List<Object> values = new ArrayList<>(input.values());
 
-        return head;
+                for (int i = 0; i < paramTypes.length; i++)
+                    args[i] = convertValue(values.get(i), paramTypes[i], input);
+
+                Object result = method.invoke(instance, args);
+                return autoConvertOutput(result);
+            }
+
+        } catch (InvocationTargetException e) {
+            throw new Exception(e.getTargetException().getMessage());
+        } catch (ClassNotFoundException ignored) {}
+
+        throw new Exception("Function '" + functionName + "' not found");
     }
 
-    // ------------------------------
-    // Graph Builder
-    // ------------------------------
-    static Node buildGraph(List<List<Integer>> adjList) {
-
-        if (adjList == null || adjList.isEmpty())
-            return null;
-
-        Map<Integer, Node> map = new HashMap<>();
-
-        for (int i = 0; i < adjList.size(); i++)
-            map.put(i + 1, new Node(i + 1));
-
-        for (int i = 0; i < adjList.size(); i++) {
-            Node node = map.get(i + 1);
-            for (Integer neighbor : adjList.get(i))
-                node.neighbors.add(map.get(neighbor));
-        }
-
-        return map.get(1);
-    }
-
-    // ------------------------------
-    // Invocation
-    // ------------------------------
-    static Object invoke(String jsonInput) throws Exception {
-
-        Map<String, Object> payload =
-            mapper.readValue(jsonInput, new TypeReference<Map<String, Object>>() {});
-
-        String functionName = (String) payload.get("function_name");
-        Map<String, Object> input =
-            (Map<String, Object>) payload.get("input");
-
-        // ALWAYS new instance per invocation
-        Class<?> clazz = Class.forName("Solution");
-        Object instance = clazz.getDeclaredConstructor().newInstance();
-
-        Method target = null;
-        for (Method m : clazz.getDeclaredMethods()) {
-            if (m.getName().equals(functionName)) {
-                target = m;
-                break;
-            }
-        }
-
-        if (target == null)
-            throw new RuntimeException("Method not found: " + functionName);
-
-        Class<?>[] paramTypes = target.getParameterTypes();
-        java.lang.reflect.Parameter[] parameters = target.getParameters();
-        Object[] args = new Object[paramTypes.length];
-
-        for (int i = 0; i < paramTypes.length; i++) {
-            String paramName = parameters[i].getName();
-            Object value = input.get(paramName);
-            Class<?> type = paramTypes[i];
-
-            if (type == int[].class) {
-                List<Integer> list = (List<Integer>) value;
-                int[] arr = new int[list.size()];
-                for (int j = 0; j < list.size(); j++)
-                    arr[j] = list.get(j);
-                args[i] = Arrays.copyOf(arr, arr.length); // deep copy
-            }
-            else if (type == int.class) {
-                args[i] = ((Number) value).intValue();
-            }
-            else {
-                args[i] = value;
-            }
-        }
-
-        Object result = target.invoke(instance, args);
-
-        return normalize(result);
-    }
-
-    // ------------------------------
-    // Main
-    // ------------------------------
     public static void main(String[] args) {
 
         try {
-            BufferedReader reader =
-                new BufferedReader(new InputStreamReader(System.in));
 
-            StringBuilder sb = new StringBuilder();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+            StringBuilder inputBuilder = new StringBuilder();
             String line;
 
             while ((line = reader.readLine()) != null)
-                sb.append(line);
+                inputBuilder.append(line);
 
-            Object result = invoke(sb.toString());
+            Map<String, Object> payload =
+                mapper.readValue(inputBuilder.toString(),
+                    new TypeReference<Map<String, Object>>() {});
 
-            Map<String, Object> output = new HashMap<>();
-            output.put("result", result);
+            String functionName = (String) payload.get("function_name");
+            Map<String, Object> input =
+                (Map<String, Object>) payload.get("input");
 
-            System.out.println(mapper.writeValueAsString(output));
+            Object result = executeFunction(functionName, input);
 
-        } catch (InvocationTargetException e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("result", result);
 
-            Throwable cause = e.getCause();
-            try {
-                System.out.println(
-                    mapper.writeValueAsString(
-                        Collections.singletonMap("error", cause.toString())
-                    )
-                );
-            } catch (Exception ignored) {}
+            System.out.println(mapper.writeValueAsString(response));
 
         } catch (Exception e) {
 
             try {
-                System.out.println(
-                    mapper.writeValueAsString(
-                        Collections.singletonMap("error", e.toString())
-                    )
-                );
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", e.getMessage());
+                System.out.println(mapper.writeValueAsString(error));
             } catch (Exception ignored) {}
+
+            System.exit(1);
         }
     }
 }

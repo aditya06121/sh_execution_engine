@@ -6,6 +6,6 @@ RUN npm install -g typescript
 RUN npm install -g esbuild
 
 RUN adduser -D sandbox
-USER sandbox
+#USER sandbox
 
 CMD ["node"]

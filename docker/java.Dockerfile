@@ -46,7 +46,7 @@ WORKDIR /app
 # -----------------------------
 # Drop Privileges
 # -----------------------------
-USER judgeuser
+#USER judgeuser
 
 # -----------------------------
 # Default Command

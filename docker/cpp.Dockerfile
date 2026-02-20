@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd -m -s /bin/bash runner
 
-USER runner
+#USER runner
 
 WORKDIR /app
 

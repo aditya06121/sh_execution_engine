@@ -5,7 +5,10 @@ import json
 import shutil
 
 from execution.base import BaseExecutor
-from execution.exceptions import CompileError, RuntimeExecutionError
+from execution.exceptions import (
+    CompileError,
+    RuntimeExecutionError,
+)
 from execution.sandbox_paths import (
     build_host_temp_dir,
     get_sandbox_roots,
@@ -28,36 +31,37 @@ from .java_wrapper import JAVA_WRAPPER_TEMPLATE
 class JavaExecutor(BaseExecutor):
 
     IMAGE_NAME = "java-sandbox:latest"
-    CLASSPATH = ".:/opt/libs/*"
 
     def __init__(self, code: str, function_name: str):
         super().__init__(code, function_name)
+        self.container_id = None
         self.temp_dir = None
         self.host_temp_dir = None
-        self.container_id = None
+        self.file_path = None
 
     # -------------------------
-    # Compile (start container + compile once)
+    # Compile Phase
     # -------------------------
 
     def compile(self):
 
         container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
-        # 1️⃣ Create workspace
+        # 1️⃣ Create temp directory
         self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
         self.host_temp_dir = build_host_temp_dir(host_sandbox_root, self.temp_dir)
 
-        file_path = os.path.join(self.temp_dir, "Main.java")
+        self.file_path = os.path.join(self.temp_dir, "Main.java")
 
+        # 2️⃣ Wrap user code
         wrapped_code = JAVA_WRAPPER_TEMPLATE.replace(
-            "{USER_CODE}", self.code
+            "{source_code}", self.code
         )
 
-        with open(file_path, "w") as f:
+        with open(self.file_path, "w") as f:
             f.write(wrapped_code)
 
-        # 2️⃣ Start container ONCE
+        # 3️⃣ Start sandbox container
         run_cmd = [
             "docker", "run",
             "-d",
@@ -85,29 +89,31 @@ class JavaExecutor(BaseExecutor):
         except subprocess.CalledProcessError:
             raise RuntimeExecutionError("Failed to start execution container")
 
-        # 3️⃣ Compile inside container ONCE
+        # 4️⃣ Compile inside container
         compile_cmd = [
             "docker", "exec",
             self.container_id,
             "javac",
-            "-parameters",
-            "-cp", self.CLASSPATH,
+            "-cp",
+            ".:/opt/libs/*",
             "Main.java"
         ]
 
-        compile_process = subprocess.run(
-            compile_cmd,
-            capture_output=True,
-            text=True
-        )
-
-        if compile_process.returncode != 0:
-            raise CompileError(
-                compile_process.stderr.strip()[:1000]
+        try:
+            compile_proc = subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=EXECUTION_TIMEOUT_SECONDS
             )
+        except subprocess.TimeoutExpired:
+            raise CompileError("Compilation timed out")
+
+        if compile_proc.returncode != 0:
+            raise CompileError(compile_proc.stderr.strip() or "Compilation failed")
 
     # -------------------------
-    # Run (exec inside same container)
+    # Run Phase
     # -------------------------
 
     def run(self, test_input: dict):
@@ -125,11 +131,8 @@ class JavaExecutor(BaseExecutor):
             "-i",
             self.container_id,
             "java",
-            "-Xms32m",
-            "-Xmx128m",
-            "-XX:+UseSerialGC",
-            "-XX:TieredStopAtLevel=1",
-            "-cp", self.CLASSPATH,
+            "-cp",
+            ".:/opt/libs/*",
             "Main"
         ]
 
@@ -144,30 +147,27 @@ class JavaExecutor(BaseExecutor):
         except subprocess.TimeoutExpired:
             raise RuntimeExecutionError("Execution timed out")
 
-        stdout = process.stdout.strip()
-        stderr = process.stderr.strip()
-
-        if len(stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
+        # 🔐 Output limit enforcement
+        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 
         if process.returncode != 0:
             try:
-                error_json = json.loads(stdout)
+                error_json = json.loads(process.stdout)
                 message = error_json.get("error", "Runtime error")
             except Exception:
-                message = stderr or stdout or "Runtime error"
-            raise RuntimeExecutionError(message[:1000])
+                message = process.stderr or "Runtime error"
+
+            raise RuntimeExecutionError(message)
 
         try:
-            result_json = json.loads(stdout)
+            result_json = json.loads(process.stdout)
             return result_json["result"]
         except Exception:
-            raise RuntimeExecutionError(
-                f"Invalid output format. Raw output:\n{stdout[:500]}"
-            )
+            raise RuntimeExecutionError("Invalid output format")
 
     # -------------------------
-    # Cleanup
+    # Cleanup Phase
     # -------------------------
 
     def cleanup(self):
