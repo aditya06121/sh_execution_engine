@@ -1,8 +1,10 @@
-KOTLIN_WRAPPER_TEMPLATE=r"""
-import java.io.*
-import java.lang.reflect.*
+KOTLIN_WRAPPER_TEMPLATE = r"""
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
 import java.util.*
-import com.fasterxml.jackson.databind.*
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.core.type.TypeReference
 
 // ==============================
@@ -23,153 +25,83 @@ class Node(var `val`: Int) {
 }
 
 // ==============================
-// User Code
+// Helper Builders
 // ==============================
 
-{USER_CODE}
+object Builders {
 
-// ==============================
-// Execution Engine
-// ==============================
+    fun buildTree(values: List<Int?>?): TreeNode? {
+        if (values == null || values.isEmpty()) return null
 
-object MainKt {
-
-    private val mapper = ObjectMapper()
-
-    // ------------------------------
-    // Tree Builder
-    // ------------------------------
-    private fun buildTree(values: List<Int?>?): TreeNode? {
-
-        if (values == null || values.isEmpty() || values[0] == null)
-            return null
-
-        val root = TreeNode(values[0]!!)
-        val queue: Queue<TreeNode> = LinkedList()
-        queue.add(root)
+        val nodes = values.map { if (it == null) null else TreeNode(it) }
+        val root = nodes[0]
+        val queue: Queue<TreeNode?> = LinkedList()
+        queue.offer(root)
 
         var i = 1
-
-        while (queue.isNotEmpty() && i < values.size) {
-            val node = queue.poll()
-
-            if (i < values.size && values[i] != null) {
-                node.left = TreeNode(values[i]!!)
-                queue.add(node.left)
+        while (queue.isNotEmpty() && i < nodes.size) {
+            val current = queue.poll()
+            if (current != null) {
+                current.left = nodes[i++]
+                if (i < nodes.size) current.right = nodes[i++]
+                queue.offer(current.left)
+                queue.offer(current.right)
             }
-            i++
-
-            if (i < values.size && values[i] != null) {
-                node.right = TreeNode(values[i]!!)
-                queue.add(node.right)
-            }
-            i++
         }
 
         return root
     }
 
-    // ------------------------------
-    // Linked List Builder
-    // ------------------------------
-    private fun buildList(values: List<Int>?, pos: Int?): ListNode? {
+    fun treeToList(root: TreeNode?): List<Int?> {
+        if (root == null) return emptyList()
 
-        if (values == null || values.isEmpty())
-            return null
-
-        val head = ListNode(values[0])
-        var curr = head
-
-        val nodes = mutableListOf<ListNode>()
-        nodes.add(head)
-
-        for (i in 1 until values.size) {
-            curr.next = ListNode(values[i])
-            curr = curr.next!!
-            nodes.add(curr)
-        }
-
-        if (pos != null && pos >= 0 && pos < nodes.size)
-            curr.next = nodes[pos]
-
-        return head
-    }
-
-    // ------------------------------
-    // Graph Builder
-    // ------------------------------
-    private fun buildGraph(adj: List<List<Int>>?): Node? {
-
-        if (adj == null || adj.isEmpty())
-            return null
-
-        val map = HashMap<Int, Node>()
-
-        for (i in adj.indices)
-            map[i + 1] = Node(i + 1)
-
-        for (i in adj.indices) {
-            val node = map[i + 1]!!
-            for (nei in adj[i])
-                node.neighbors.add(map[nei]!!)
-        }
-
-        return map[1]
-    }
-
-    // ------------------------------
-    // Graph to Adj List
-    // ------------------------------
-    private fun graphToAdj(node: Node?): List<List<Int>> {
-
-        if (node == null)
-            return emptyList()
-
-        val map = HashMap<Int, Node>()
-        val queue: Queue<Node> = LinkedList()
-        val visited = HashSet<Int>()
-
-        queue.add(node)
-        map[node.`val`] = node
+        val result = mutableListOf<Int?>()
+        val queue: Queue<TreeNode?> = LinkedList()
+        queue.offer(root)
 
         while (queue.isNotEmpty()) {
-            val curr = queue.poll()
-
-            if (!visited.add(curr.`val`))
-                continue
-
-            for (nei in curr.neighbors) {
-                if (!map.containsKey(nei.`val`)) {
-                    map[nei.`val`] = nei
-                    queue.add(nei)
-                }
+            val node = queue.poll()
+            if (node != null) {
+                result.add(node.`val`)
+                queue.offer(node.left)
+                queue.offer(node.right)
+            } else {
+                result.add(null)
             }
         }
 
-        val size = map.size
-        val result = MutableList(size) { mutableListOf<Int>() }
-
-        for (i in 1..size) {
-            val curr = map[i]
-            curr?.neighbors?.forEach {
-                result[i - 1].add(it.`val`)
-            }
-        }
+        while (result.isNotEmpty() && result.last() == null)
+            result.removeAt(result.size - 1)
 
         return result
     }
 
-    // ------------------------------
-    // ListNode to Array
-    // ------------------------------
-    private fun listToArray(head: ListNode?): List<Int> {
+    fun buildLinkedList(values: List<Int>?, pos: Int): ListNode? {
+        if (values == null || values.isEmpty()) return null
 
+        val dummy = ListNode(0)
+        var curr = dummy
+        val nodes = mutableListOf<ListNode>()
+
+        for (v in values) {
+            curr.next = ListNode(v)
+            curr = curr.next!!
+            nodes.add(curr)
+        }
+
+        if (pos != -1 && pos < nodes.size)
+            curr.next = nodes[pos]
+
+        return dummy.next
+    }
+
+    fun linkedListToList(head: ListNode?): List<Int> {
         val result = mutableListOf<Int>()
         val visited = HashSet<ListNode>()
-
         var curr = head
 
-        while (curr != null && visited.add(curr)) {
+        while (curr != null && !visited.contains(curr)) {
+            visited.add(curr)
             result.add(curr.`val`)
             curr = curr.next
         }
@@ -177,130 +109,184 @@ object MainKt {
         return result
     }
 
-    // ------------------------------
-    // Tree to Level Order
-    // ------------------------------
-    private fun treeToArray(root: TreeNode?): List<Int?> {
+    fun buildGraph(adj: List<List<Int>>?): Node? {
+        if (adj == null || adj.isEmpty()) return null
 
-        val result = mutableListOf<Int?>()
-        if (root == null) return result
+        val nodes = HashMap<Int, Node>()
+        for (i in adj.indices)
+            nodes[i + 1] = Node(i + 1)
 
-        val queue: Queue<TreeNode?> = LinkedList()
-        queue.add(root)
+        for (i in adj.indices)
+            for (n in adj[i])
+                nodes[i + 1]!!.neighbors.add(nodes[n]!!)
+
+        return nodes[1]
+    }
+
+    fun graphToAdjList(node: Node?): List<List<Int>> {
+        if (node == null) return emptyList()
+
+        val visited = HashSet<Node>()
+        val queue: Queue<Node> = LinkedList()
+        val nodes = mutableListOf<Node>()
+
+        queue.offer(node)
 
         while (queue.isNotEmpty()) {
-            val node = queue.poll()
+            val curr = queue.poll()
+            if (visited.contains(curr)) continue
 
-            if (node == null) {
-                result.add(null)
-                continue
-            }
+            visited.add(curr)
+            nodes.add(curr)
 
-            result.add(node.`val`)
-            queue.add(node.left)
-            queue.add(node.right)
+            for (n in curr.neighbors)
+                if (!visited.contains(n))
+                    queue.offer(n)
         }
 
-        while (result.isNotEmpty() && result.last() == null)
-            result.removeAt(result.lastIndex)
+        nodes.sortBy { it.`val` }
+
+        val maxVal = nodes.maxOf { it.`val` }
+        val result = MutableList(maxVal) { mutableListOf<Int>() }
+
+        for (curr in nodes)
+            for (n in curr.neighbors)
+                result[curr.`val` - 1].add(n.`val`)
 
         return result
     }
+}
 
-    // ------------------------------
-    // Invocation
-    // ------------------------------
-    private fun invoke(jsonInput: String): Any? {
+// ==============================
+// User Code
+// ==============================
 
-        val payload: Map<String, Any?> =
-            mapper.readValue(jsonInput, object : TypeReference<Map<String, Any?>>() {})
+{source_code}
 
-        val functionName = payload["function_name"] as String
-        val input = payload["input"] as Map<String, Any?>
+// ==============================
+// Execution Engine
+// ==============================
 
-        val clazz = Class.forName("Solution")
-        val instance = clazz.getDeclaredConstructor().newInstance()
+object Main {
 
-        val method = clazz.declaredMethods.firstOrNull {
-            it.name == functionName
-        } ?: throw RuntimeException("Method not found: $functionName")
+    private val mapper = ObjectMapper()
 
-        val paramTypes = method.parameterTypes
-        val args = arrayOfNulls<Any>(paramTypes.size)
-
-        val posMeta = (input["pos"] as? Number)?.toInt()
-
-        var index = 0
-
-        for ((key, value) in input) {
-
-            if (key == "pos") continue
-
-            when (paramTypes[index]) {
-                IntArray::class.java -> {
-                    val list = value as List<Int>
-                    args[index] = list.toIntArray()
-                }
-                TreeNode::class.java -> {
-                    args[index] = buildTree(value as List<Int?>)
-                }
-                ListNode::class.java -> {
-                    args[index] = buildList(value as List<Int>, posMeta)
-                }
-                Node::class.java -> {
-                    args[index] = buildGraph(value as List<List<Int>>)
-                }
-                Int::class.javaPrimitiveType -> {
-                    args[index] = (value as Number).toInt()
-                }
-                else -> {
-                    args[index] = value
-                }
-            }
-            index++
-        }
-
-        val result = method.invoke(instance, *args)
-
+    private fun autoConvertOutput(result: Any?): Any? {
         return when (result) {
-            is ListNode -> listToArray(result)
-            is TreeNode -> treeToArray(result)
-            is Node -> graphToAdj(result)
+            is TreeNode -> Builders.treeToList(result)
+            is ListNode -> Builders.linkedListToList(result)
+            is Node -> Builders.graphToAdjList(result)
             else -> result
         }
     }
 
-    // ------------------------------
-    // Main
-    // ------------------------------
+    private fun convertValue(value: Any?, targetType: Class<*>, fullInput: Map<String, Any?>): Any? {
+
+        if (value == null) return null
+
+        if (targetType == Int::class.java || targetType == Integer.TYPE)
+            return (value as Number).toInt()
+
+        if (targetType == Long::class.java || targetType == java.lang.Long.TYPE)
+            return (value as Number).toLong()
+
+        if (targetType == Double::class.java || targetType == java.lang.Double.TYPE)
+            return (value as Number).toDouble()
+
+        if (targetType == Boolean::class.java || targetType == java.lang.Boolean.TYPE)
+            return value
+
+        if (targetType == String::class.java)
+            return value.toString()
+
+        if (targetType == IntArray::class.java) {
+            val list = value as List<*>
+            return list.map { (it as Number).toInt() }.toIntArray()
+        }
+
+        if (targetType == Array<IntArray>::class.java) {
+            val outer = value as List<*>
+            return outer.map {
+                (it as List<*>).map { n -> (n as Number).toInt() }.toIntArray()
+            }.toTypedArray()
+        }
+
+        if (targetType == TreeNode::class.java)
+            return Builders.buildTree(value as List<Int?>)
+
+        if (targetType == ListNode::class.java) {
+            val pos = (fullInput["pos"] as? Number)?.toInt() ?: -1
+            return Builders.buildLinkedList(value as List<Int>, pos)
+        }
+
+        if (targetType == Node::class.java)
+            return Builders.buildGraph(value as List<List<Int>>)
+
+        return value
+    }
+
+    private fun executeFunction(functionName: String, input: Map<String, Any?>): Any? {
+
+        try {
+            val solutionClass = Class.forName("Solution")
+            val instance = solutionClass.getDeclaredConstructor().newInstance()
+
+            for (method in solutionClass.declaredMethods) {
+
+                if (method.name != functionName) continue
+
+                val paramTypes = method.parameterTypes
+                val values = ArrayList(input.values)
+                val args = Array<Any?>(paramTypes.size) { null }
+
+                for (i in paramTypes.indices)
+                    args[i] = convertValue(values[i], paramTypes[i], input)
+
+                val result = method.invoke(instance, *args)
+                return autoConvertOutput(result)
+            }
+
+        } catch (e: InvocationTargetException) {
+            throw Exception(e.targetException.message)
+        }
+
+        throw Exception("Function '$functionName' not found")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
 
         try {
             val reader = BufferedReader(InputStreamReader(System.`in`))
-            val input = reader.readText()
+            val inputBuilder = StringBuilder()
+            var line: String?
 
-            val result = invoke(input)
+            while (reader.readLine().also { line = it } != null)
+                inputBuilder.append(line)
 
-            val output = mapOf("result" to result)
-            println(mapper.writeValueAsString(output))
+            val payload: Map<String, Any?> =
+                mapper.readValue(inputBuilder.toString(),
+                    object : TypeReference<Map<String, Any?>>() {})
 
-        } catch (e: InvocationTargetException) {
+            val functionName = payload["function_name"] as String
+            val input = payload["input"] as Map<String, Any?>
 
-            val cause = e.targetException
-            println(
-                mapper.writeValueAsString(
-                    mapOf("error" to cause.toString())
-                )
-            )
+            val result = executeFunction(functionName, input)
+
+            val response = HashMap<String, Any?>()
+            response["result"] = result
+
+            println(mapper.writeValueAsString(response))
 
         } catch (e: Exception) {
 
-            println(
-                mapper.writeValueAsString(
-                    mapOf("error" to e.toString())
-                )
-            )
+            try {
+                val error = HashMap<String, Any?>()
+                error["error"] = e.message
+                println(mapper.writeValueAsString(error))
+            } catch (_: Exception) {}
+
+            System.exit(1)
         }
     }
 }

@@ -5,14 +5,19 @@ import json
 import shutil
 
 from execution.base import BaseExecutor
-from execution.exceptions import CompileError, RuntimeExecutionError
+from execution.exceptions import (
+    CompileError,
+    RuntimeExecutionError,
+)
 from execution.sandbox_paths import (
     build_host_temp_dir,
     get_sandbox_roots,
 )
-
+COMPILATION_TIMEOUT_SECONDS = 20
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
+    DOCKER_MEMORY_LIMIT,
+    DOCKER_MEMORY_SWAP,
     DOCKER_CPU_LIMIT,
     DOCKER_PIDS_LIMIT,
     DOCKER_NOFILE_LIMIT,
@@ -25,63 +30,56 @@ from .kotlin_wrapper import KOTLIN_WRAPPER_TEMPLATE
 
 class KotlinExecutor(BaseExecutor):
 
-    IMAGE_NAME = "java-sandbox:latest"
-
-    # Explicit jars (kotlinc does NOT expand *)
-    LIB_CLASSPATH = (
-        "/opt/libs/jackson-core.jar:"
-        "/opt/libs/jackson-databind.jar:"
-        "/opt/libs/jackson-annotations.jar"
-    )
-
-    # Runtime classpath (JVM expands *)
-    RUNTIME_CLASSPATH = "main.jar:/opt/libs/*"
+    IMAGE_NAME = "java-sandbox:latest"  # same image (has kotlinc + JDK)
 
     def __init__(self, code: str, function_name: str):
-        # Normalize escaped newlines if frontend sends them
-        code = code.replace("\\n", "\n")
         super().__init__(code, function_name)
-
+        self.container_id = None
         self.temp_dir = None
         self.host_temp_dir = None
-        self.container_id = None
+        self.file_path = None
 
-    # ==========================================================
-    # COMPILE PHASE
-    # ==========================================================
+    # -------------------------
+    # Compile Phase
+    # -------------------------
 
     def compile(self):
 
         container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
-        # 1️⃣ Create workspace
+        # 1️⃣ Create temp directory
         self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
         self.host_temp_dir = build_host_temp_dir(host_sandbox_root, self.temp_dir)
 
-        file_path = os.path.join(self.temp_dir, "Main.kt")
+        self.file_path = os.path.join(self.temp_dir, "Main.kt")
 
+        # 2️⃣ Wrap user code
         wrapped_code = KOTLIN_WRAPPER_TEMPLATE.replace(
-            "{USER_CODE}", self.code
+            "{source_code}", self.code
         )
 
-        with open(file_path, "w") as f:
+        with open(self.file_path, "w") as f:
             f.write(wrapped_code)
 
-        # 2️⃣ Start container
+        # 3️⃣ Start sandbox container
         run_cmd = [
             "docker", "run",
             "-d",
             "--rm",
-            "--memory", "512m",
-            "--memory-swap", "512m",
+
+            "--memory", DOCKER_MEMORY_LIMIT,
+            "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
+
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
+
             "-v", f"{self.host_temp_dir}:/app",
             "-w", "/app",
+
             self.IMAGE_NAME,
             "sleep", str(CONTAINER_SLEEP_SECONDS)
         ]
@@ -91,35 +89,34 @@ class KotlinExecutor(BaseExecutor):
         except subprocess.CalledProcessError:
             raise RuntimeExecutionError("Failed to start execution container")
 
-        # 3️⃣ Compile Kotlin
+        # 4️⃣ Compile Kotlin inside container (produce runnable jar)
         compile_cmd = [
             "docker", "exec",
             self.container_id,
             "kotlinc",
             "Main.kt",
-            "-include-runtime",
-            "-cp", self.LIB_CLASSPATH,
-            "-d", "main.jar",
-            "-J-Xms64m",
-            "-J-Xmx256m",
-            "-J-XX:MaxMetaspaceSize=128m",
-            "-J-XX:+UseSerialGC"
+            "-cp",
+            "/opt/libs/jackson-core.jar:/opt/libs/jackson-databind.jar:/opt/libs/jackson-annotations.jar",
+            "-d",
+            "."
         ]
 
-        compile_process = subprocess.run(
-            compile_cmd,
-            capture_output=True,
-            text=True
-        )
-
-        if compile_process.returncode != 0:
-            raise CompileError(
-                (compile_process.stderr or compile_process.stdout).strip()[:1000]
+        try:
+            compile_proc = subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=EXECUTION_TIMEOUT_SECONDS
             )
+        except subprocess.TimeoutExpired:
+            raise CompileError("Compilation timed out")
 
-    # ==========================================================
-    # RUN PHASE
-    # ==========================================================
+        if compile_proc.returncode != 0:
+            raise CompileError(compile_proc.stderr.strip() or "Compilation failed")
+
+    # -------------------------
+    # Run Phase
+    # -------------------------
 
     def run(self, test_input: dict):
 
@@ -136,12 +133,9 @@ class KotlinExecutor(BaseExecutor):
             "-i",
             self.container_id,
             "java",
-            "-Xms32m",
-            "-Xmx128m",
-            "-XX:+UseSerialGC",
-            "-XX:TieredStopAtLevel=1",
-            "-cp", self.RUNTIME_CLASSPATH,
-            "MainKt"
+            "-cp",
+            ".:/opt/kotlinc/lib/kotlin-stdlib.jar:/opt/libs/jackson-core.jar:/opt/libs/jackson-databind.jar:/opt/libs/jackson-annotations.jar",
+            "Main"
         ]
 
         try:
@@ -155,32 +149,28 @@ class KotlinExecutor(BaseExecutor):
         except subprocess.TimeoutExpired:
             raise RuntimeExecutionError("Execution timed out")
 
-        stdout = process.stdout.strip()
-        stderr = process.stderr.strip()
-
-        if len(stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
+        # 🔐 Output limit enforcement
+        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 
         if process.returncode != 0:
             try:
-                error_json = json.loads(stdout)
+                error_json = json.loads(process.stdout)
                 message = error_json.get("error", "Runtime error")
             except Exception:
-                message = stderr or stdout or "Runtime error"
+                message = process.stderr or "Runtime error"
 
-            raise RuntimeExecutionError(message[:1000])
+            raise RuntimeExecutionError(message)
 
         try:
-            result_json = json.loads(stdout)
+            result_json = json.loads(process.stdout)
             return result_json["result"]
         except Exception:
-            raise RuntimeExecutionError(
-                f"Invalid output format. Raw output:\n{stdout[:500]}"
-            )
+            raise RuntimeExecutionError("Invalid output format")
 
-    # ==========================================================
-    # CLEANUP
-    # ==========================================================
+    # -------------------------
+    # Cleanup Phase
+    # -------------------------
 
     def cleanup(self):
 
