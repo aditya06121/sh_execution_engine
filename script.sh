@@ -5,6 +5,10 @@ docker_create_cpp_image = docker build -t cpp-sandbox:latest -f docker/cpp.Docke
 
 docker_create_image_command= docker build -t judge-api .
 
+# docker build command for amd64
+docker_build = docker buildx build --platform linux/amd64 -t gisul/execution-engine-py:latest --push .
+
+
 
 # for mac os
 docker_run_command=
