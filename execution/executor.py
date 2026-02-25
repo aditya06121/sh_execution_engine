@@ -4,6 +4,8 @@ from languages.ts import TypeScriptExecutor
 from languages.java import JavaExecutor
 from languages.kotlin import KotlinExecutor
 from languages.csharp import CSharpExecutor
+from languages.cpp import CppExecutor
+from languages.c import CExecutor
 
 class ExecutorFactory:
 
@@ -15,7 +17,9 @@ class ExecutorFactory:
         "ts": TypeScriptExecutor,
         "java": JavaExecutor,
         "kotlin": KotlinExecutor,
-        "csharp": CSharpExecutor
+        "csharp": CSharpExecutor,
+        "cpp" : CppExecutor,
+        "c" : CExecutor
     }
 
     @staticmethod
