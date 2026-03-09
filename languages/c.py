@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import os
+import json
 import shutil
 import re
 
@@ -9,6 +10,7 @@ from execution.exceptions import (
     CompileError,
     RuntimeExecutionError,
 )
+
 from execution.sandbox_paths import (
     build_host_temp_dir,
     get_sandbox_roots,
@@ -40,19 +42,26 @@ class CExecutor(BaseExecutor):
         self.file_path = None
 
     # ==========================================================
-    # COMPILE PHASE
+    # Compile Phase
     # ==========================================================
 
     def compile(self):
 
-        container_root, host_root = get_sandbox_roots()
+        container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
-        self.temp_dir = tempfile.mkdtemp(dir=container_root)
-        self.host_temp_dir = build_host_temp_dir(host_root, self.temp_dir)
+        self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
+
+        self.host_temp_dir = build_host_temp_dir(
+            host_sandbox_root,
+            self.temp_dir
+        )
 
         wrapped_code = self._generate_wrapper()
 
-        self.file_path = os.path.join(self.temp_dir, "solution.c")
+        if "__PLACEHOLDER__" in wrapped_code:
+            raise CompileError("Wrapper placeholder replacement failed")
+
+        self.file_path = os.path.join(self.temp_dir, "solution.cpp")
 
         with open(self.file_path, "w") as f:
             f.write(wrapped_code)
@@ -61,16 +70,20 @@ class CExecutor(BaseExecutor):
             "docker", "run",
             "-d",
             "--rm",
+
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
+
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
+
             "-v", f"{self.host_temp_dir}:/app",
             "-w", "/app",
+
             self.IMAGE_NAME,
             "sleep", str(CONTAINER_SLEEP_SECONDS)
         ]
@@ -78,15 +91,15 @@ class CExecutor(BaseExecutor):
         try:
             self.container_id = subprocess.check_output(run_cmd).decode().strip()
         except subprocess.CalledProcessError:
-            raise RuntimeExecutionError("Failed to start C container")
+            raise RuntimeExecutionError("Failed to start container")
 
         compile_cmd = [
             "docker", "exec",
             self.container_id,
-            "gcc",
-            "solution.c",
+            "g++",
+            "solution.cpp",
             "-O2",
-            "-std=c11",
+            "-std=c++20",
             "-o",
             "solution"
         ]
@@ -98,10 +111,10 @@ class CExecutor(BaseExecutor):
         )
 
         if result.returncode != 0:
-            raise CompileError(result.stderr.strip())
+            raise CompileError(result.stderr)
 
     # ==========================================================
-    # RUN PHASE
+    # Run Phase
     # ==========================================================
 
     def run(self, test_input: dict):
@@ -109,7 +122,7 @@ class CExecutor(BaseExecutor):
         if not self.container_id:
             raise RuntimeExecutionError("Container not initialized")
 
-        stdin_payload = self._build_stdin(test_input)
+        payload = json.dumps(test_input)
 
         exec_cmd = [
             "docker", "exec",
@@ -121,7 +134,7 @@ class CExecutor(BaseExecutor):
         try:
             process = subprocess.run(
                 exec_cmd,
-                input=stdin_payload,
+                input=payload,
                 text=True,
                 capture_output=True,
                 timeout=EXECUTION_TIMEOUT_SECONDS
@@ -129,18 +142,21 @@ class CExecutor(BaseExecutor):
         except subprocess.TimeoutExpired:
             raise RuntimeExecutionError("Execution timed out")
 
-        if len(process.stdout.encode()) > MAX_STDOUT_BYTES:
+        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 
         if process.returncode != 0:
             raise RuntimeExecutionError(
-                process.stderr.strip() or "Runtime error"
+                process.stderr.strip() or process.stdout.strip() or "Runtime error"
             )
 
-        return process.stdout.strip()
+        try:
+            return json.loads(process.stdout.strip())
+        except Exception:
+            raise RuntimeExecutionError("Invalid JSON output")
 
     # ==========================================================
-    # CLEANUP
+    # Cleanup
     # ==========================================================
 
     def cleanup(self):
@@ -159,96 +175,82 @@ class CExecutor(BaseExecutor):
             self.host_temp_dir = None
 
     # ==========================================================
-    # WRAPPER GENERATOR
+    # Wrapper Generator
     # ==========================================================
 
     def _generate_wrapper(self):
 
         return_type, params = self._parse_signature()
 
-        input_decl = []
-        input_scan = []
-        function_args = []
-        cleanup = []
-        output_print = ""
+        param_deserialization = []
+        param_names = []
 
         for param_type, param_name in params:
 
-            if param_type == "int":
-                input_decl.append(f"int {param_name};")
-                input_scan.append(f'scanf("%d", &{param_name});')
-                function_args.append(param_name)
+            clean_type = param_type.replace("const", "").strip()
 
-            elif param_type == "long long":
-                input_decl.append(f"long long {param_name};")
-                input_scan.append(f'scanf("%lld", &{param_name});')
-                function_args.append(param_name)
-
-            elif param_type == "double":
-                input_decl.append(f"double {param_name};")
-                input_scan.append(f'scanf("%lf", &{param_name});')
-                function_args.append(param_name)
-
-            elif param_type == "int*":
-                size_name = param_name + "Size"
-
-                input_decl.append(f"int {size_name};")
-                input_decl.append(f"int* {param_name};")
-
-                input_scan.append(f'scanf("%d", &{size_name});')
-                input_scan.append(
-                    f'{param_name} = (int*)malloc(sizeof(int) * {size_name});'
-                )
-                input_scan.append(
-                    f'for(int i=0;i<{size_name};i++) scanf("%d",&{param_name}[i]);'
+            if clean_type == "int":
+                param_deserialization.append(
+                    f'int {param_name} = j["{param_name}"];'
                 )
 
-                function_args.append(param_name)
-                function_args.append(size_name)
+            elif clean_type == "long":
+                param_deserialization.append(
+                    f'long {param_name} = j["{param_name}"];'
+                )
 
-                cleanup.append(f"free({param_name});")
+            elif clean_type == "double":
+                param_deserialization.append(
+                    f'double {param_name} = j["{param_name}"];'
+                )
+
+            elif clean_type == "char*":
+                param_deserialization.append(
+                    f'string {param_name}_tmp = j["{param_name}"];'
+                )
+                param_deserialization.append(
+                    f'char* {param_name} = (char*){param_name}_tmp.c_str();'
+                )
 
             else:
-                raise CompileError(f"Unsupported C type: {param_type}")
+                raise CompileError(f"Unsupported C type: {clean_type}")
 
-        # Return handling
-        if return_type == "int":
-            output_print = 'printf("%d", result);'
-        elif return_type == "long long":
-            output_print = 'printf("%lld", result);'
-        elif return_type == "double":
-            output_print = 'printf("%f", result);'
-        else:
-            raise CompileError("Unsupported return type")
+            param_names.append(param_name)
 
-        function_call = f"{return_type} result = {self.function_name}({', '.join(function_args)});"
+        return_serialization = "output = result;"
 
         wrapper = C_WRAPPER_TEMPLATE \
-            .replace("__FUNCTION_SIGNATURE_PLACEHOLDER__",
-                     f"{return_type} {self.function_name}({', '.join([f'{t} {n}' for t,n in params])});") \
-            .replace("__INPUT_DECLARATION_PLACEHOLDER__",
-                     "\n    ".join(input_decl)) \
-            .replace("__INPUT_SCAN_PLACEHOLDER__",
-                     "\n    ".join(input_scan)) \
-            .replace("__FUNCTION_CALL_PLACEHOLDER__",
-                     function_call) \
-            .replace("__OUTPUT_PRINT_PLACEHOLDER__",
-                     output_print) \
-            .replace("__CLEANUP_PLACEHOLDER__",
-                     "\n    ".join(cleanup)) \
-            .replace("__USER_CODE_PLACEHOLDER__",
-                     self.code)
+            .replace(
+                "__FUNCTION_SIGNATURE_PLACEHOLDER__",
+                f"{return_type} {self.function_name}({', '.join([f'{t} {n}' for t, n in params])});"
+            ) \
+            .replace(
+                "__PARAMETER_DESERIALIZATION_PLACEHOLDER__",
+                "\n        ".join(param_deserialization)
+            ) \
+            .replace(
+                "__FUNCTION_CALL_PLACEHOLDER__",
+                f"auto result = {self.function_name}({', '.join(param_names)});"
+            ) \
+            .replace(
+                "__RETURN_SERIALIZATION_PLACEHOLDER__",
+                return_serialization
+            ) \
+            .replace(
+                "__USER_CODE_PLACEHOLDER__",
+                self.code
+            )
 
         return wrapper
 
     # ==========================================================
-    # SIGNATURE PARSER
+    # Signature Parser
     # ==========================================================
 
     def _parse_signature(self):
 
-        pattern = rf'([a-zA-Z_][a-zA-Z0-9_ \*]*)\s+{self.function_name}\s*\((.*?)\)'
-        match = re.search(pattern, self.code)
+        pattern = rf'([^\s]+(?:\s*\*?)?)\s+{self.function_name}\s*\((.*?)\)'
+        match = re.search(pattern, self.code, re.DOTALL)
 
         if not match:
             raise CompileError("Could not parse function signature")
@@ -260,27 +262,11 @@ class CExecutor(BaseExecutor):
 
         if params_str:
             raw_params = [p.strip() for p in params_str.split(",")]
+
             for p in raw_params:
                 parts = p.split()
-                param_name = parts[-1]
+                param_name = parts[-1].replace("&", "").replace("*", "")
                 param_type = " ".join(parts[:-1])
                 params.append((param_type.strip(), param_name.strip()))
 
         return return_type, params
-
-    # ==========================================================
-    # STDIN BUILDER
-    # ==========================================================
-
-    def _build_stdin(self, test_input: dict):
-
-        lines = []
-
-        for value in test_input.values():
-            if isinstance(value, list):
-                lines.append(str(len(value)))
-                lines.append(" ".join(map(str, value)))
-            else:
-                lines.append(str(value))
-
-        return "\n".join(lines)

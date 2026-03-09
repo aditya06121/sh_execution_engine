@@ -1,44 +1,35 @@
-C_WRAPPER_TEMPLATE = r"""
+RUST_WRAPPER_TEMPLATE = r"""
 
-#include <iostream>
-#include <string>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-using namespace std;
+use std::io::{self, Read};
+use serde_json::{Value, json};
 
 // ======================================================
 // FUNCTION FORWARD DECLARATION (AUTO-INJECTED)
 // ======================================================
 
-extern "C" {
 __FUNCTION_SIGNATURE_PLACEHOLDER__
-}
 
 // ======================================================
 // MAIN EXECUTION ENTRY
 // ======================================================
 
-int main() {
+fn main() {
 
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
+    // Read stdin
+    let mut input = String::new();
 
-    string input;
-
-    if (!getline(cin, input)) {
-        cout << "{\"error\":\"No input received\"}";
-        return 1;
+    if io::stdin().read_to_string(&mut input).is_err() {
+        println!("{{\"error\":\"Failed to read input\"}}");
+        return;
     }
 
-    json j;
-
-    try {
-        j = json::parse(input);
-    } catch (...) {
-        cout << "{\"error\":\"Invalid JSON input\"}";
-        return 1;
-    }
+    let j: Value = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(_) => {
+            println!("{{\"error\":\"Invalid JSON input\"}}");
+            return;
+        }
+    };
 
     // ==================================================
     // PARAMETER DESERIALIZATION (AUTO-GENERATED)
@@ -50,19 +41,19 @@ int main() {
     // FUNCTION INVOCATION
     // ==================================================
 
-    __FUNCTION_CALL_PLACEHOLDER__
+    let result = __FUNCTION_NAME_PLACEHOLDER__(
+        __FUNCTION_ARGUMENT_LIST_PLACEHOLDER__
+    );
 
     // ==================================================
     // RETURN SERIALIZATION
     // ==================================================
 
-    json output;
+    let output = {
+        __RETURN_SERIALIZATION_PLACEHOLDER__
+    };
 
-    __RETURN_SERIALIZATION_PLACEHOLDER__
-
-    cout << output.dump();
-
-    return 0;
+    println!("{}", serde_json::to_string(&output).unwrap());
 }
 
 // ======================================================

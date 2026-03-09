@@ -1,4 +1,4 @@
-C_WRAPPER_TEMPLATE = r"""
+
 
 #include <iostream>
 #include <string>
@@ -12,7 +12,7 @@ using namespace std;
 // ======================================================
 
 extern "C" {
-__FUNCTION_SIGNATURE_PLACEHOLDER__
+int add(int a, int b);
 }
 
 // ======================================================
@@ -44,13 +44,14 @@ int main() {
     // PARAMETER DESERIALIZATION (AUTO-GENERATED)
     // ==================================================
 
-    __PARAMETER_DESERIALIZATION_PLACEHOLDER__
+    int a = j["a"];
+        int b = j["b"];
 
     // ==================================================
     // FUNCTION INVOCATION
     // ==================================================
 
-    __FUNCTION_CALL_PLACEHOLDER__
+    auto result = add(a, b);
 
     // ==================================================
     // RETURN SERIALIZATION
@@ -58,7 +59,7 @@ int main() {
 
     json output;
 
-    __RETURN_SERIALIZATION_PLACEHOLDER__
+    output = result;
 
     cout << output.dump();
 
@@ -69,6 +70,5 @@ int main() {
 // USER CODE INJECTION
 // ======================================================
 
-__USER_CODE_PLACEHOLDER__
+int add(int a, int b) { return a + b; }
 
-"""

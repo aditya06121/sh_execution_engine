@@ -7,6 +7,7 @@ from languages.csharp import CSharpExecutor
 from languages.cpp import CppExecutor
 from languages.c import CExecutor
 from languages.go import GoExecutor
+from languages.rust import RustExecutor
 
 class ExecutorFactory:
 
@@ -20,7 +21,9 @@ class ExecutorFactory:
         "kotlin": KotlinExecutor,
         "csharp": CSharpExecutor,
         "cpp" : CppExecutor,
-        "go" : GoExecutor
+        "go" : GoExecutor,
+        "c" : CExecutor,
+        "rust": RustExecutor
     }
 
     @staticmethod
