@@ -7,8 +7,8 @@ from jobqueue.redis_client import get_redis
 QUEUE_KEY = "exec:queue"
 JOB_PREFIX = "exec:job:"
 
-RESULT_TTL = 600     # seconds — clients have 10 min to poll before result expires
-JOB_MAX_AGE = 120    # seconds — strictly matches API timeout to prevent execution of abandoned jobs
+RESULT_TTL = 3600     # seconds — clients have 1 hour to poll before result expires
+JOB_MAX_AGE = 3600    # seconds — strictly matches API timeout to prevent execution of abandoned jobs
 MAX_QUEUE_DEPTH = 10_000  # refuse new jobs above this; keeps memory bounded
 
 

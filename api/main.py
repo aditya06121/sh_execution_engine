@@ -32,7 +32,7 @@ _REDIS_ERRORS = (
 # ---------------------------------------------------------------------------
 
 _POLL_INTERVAL = 0.2   # seconds between internal result checks
-_EXECUTE_TIMEOUT = 120  # seconds before giving up
+_EXECUTE_TIMEOUT = 3600  # 1 hour — allows massive spikes to sit and wait gracefully
 
 
 @app.post("/execute")

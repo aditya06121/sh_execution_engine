@@ -10,12 +10,12 @@ export const options = {
   scenarios: {
     constant_rps: {
       executor: "constant-arrival-rate",
-      rate: 200, 
+      rate: 1000, 
       timeUnit: "1s",
-      duration: "10s", 
+      duration: "1s", 
       preAllocatedVUs: 1000,
       maxVUs: 2000,
-      gracefulStop: "1m", 
+      gracefulStop: "1h", 
     },
   },
   thresholds: {
@@ -29,7 +29,7 @@ const BASE_URL = "http://103.173.99.217:8000";
 
 const SUBMIT_PARAMS = {
   headers: { "Content-Type": "application/json" },
-  timeout: "120s", 
+  timeout: "3600s", 
 };
 
 const PAYLOAD = JSON.stringify({
