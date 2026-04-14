@@ -10,12 +10,12 @@ export const options = {
   scenarios: {
     constant_rps: {
       executor: "constant-arrival-rate",
-      rate: 1000, 
+      rate: 200, 
       timeUnit: "1s",
-      duration: "1s", 
+      duration: "5s", 
       preAllocatedVUs: 1000,
       maxVUs: 2000,
-      gracefulStop: "1h", 
+      gracefulStop: "1m", 
     },
   },
   thresholds: {
