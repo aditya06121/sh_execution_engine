@@ -1,35 +1,47 @@
-import asyncio
-
 from fastapi import FastAPI, HTTPException
 
-from .schemas import ExecuteRequest, ExecuteResponse
-from execution.pipeline import ExecutionPipeline
-from config.limits import MAX_CONCURRENT_EXECUTIONS, QUEUE_TIMEOUT_SECONDS
-
+from .schemas import ExecuteRequest, SubmitResponse, JobResultResponse
+from jobqueue.job import enqueue, get_job_status, queue_depth
 
 app = FastAPI(title="Ephemeral Code Execution & Judging API")
 
-_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXECUTIONS)
 
-
-@app.post("/execute", response_model=ExecuteResponse)
+@app.post("/execute", response_model=SubmitResponse, status_code=202)
 async def execute(req: ExecuteRequest):
+    """
+    Enqueue a code execution job.  Returns immediately with a job_id.
+    Poll GET /result/{job_id} to retrieve the verdict once ready.
+    """
     try:
-        await asyncio.wait_for(_semaphore.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+        job_id = await enqueue(req.model_dump())
+    except OverflowError:
         raise HTTPException(
             status_code=503,
-            detail="Queue timeout: server is too busy, please try again later",
+            detail="Queue at capacity — try again shortly",
+            headers={"Retry-After": "5"},
         )
+    return {"job_id": job_id, "status": "queued"}
 
-    try:
-        pipeline = ExecutionPipeline(req.model_dump())
-        try:
-            return await pipeline.execute()
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Unsupported language",
-            )
-    finally:
-        _semaphore.release()
+
+@app.get("/result/{job_id}", response_model=JobResultResponse)
+async def result(job_id: str):
+    """
+    Poll for the result of a previously submitted job.
+
+    status == "queued"  → not yet picked up by a worker
+    status == "running" → worker is executing it now
+    status == "done"    → finished; check the `result` field for the verdict
+    """
+    data = await get_job_status(job_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found — it may have expired (results live for 10 minutes)",
+        )
+    return data
+
+
+@app.get("/health")
+async def health():
+    depth = await queue_depth()
+    return {"ok": True, "queue_depth": depth}

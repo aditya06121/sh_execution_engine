@@ -1,28 +1,28 @@
 import http from "k6/http";
-import { check } from "k6";
+import { check, sleep } from "k6";
 import { Rate, Trend } from "k6/metrics";
 
 // --- Custom metrics ---
 const failureRate = new Rate("failures");
-const latencyTrend = new Trend("latency");
+const e2eLatency = new Trend("e2e_latency_ms");  // submit → result ready
 
 export const options = {
   scenarios: {
     constant_rps: {
       executor: "constant-arrival-rate",
-      rate: 10, // 20 requests per second
+      rate: 10,          // requests per second to submit
       timeUnit: "1s",
-      duration: "1m", // run for 1 minute
+      duration: "1m",
       preAllocatedVUs: 20,
       maxVUs: 50,
     },
   },
   thresholds: {
-    failures: ["rate<0.1"], // optional: keep failure visibility
+    failures: ["rate<0.1"],
   },
 };
 
-const url = "http://103.173.99.217:8000/execute";
+const BASE_URL = "http://103.173.99.217:8000";
 
 const payload = JSON.stringify({
   language: "cpp",
@@ -38,18 +38,54 @@ const payload = JSON.stringify({
 });
 
 const params = {
-  headers: {
-    "Content-Type": "application/json",
-  },
+  headers: { "Content-Type": "application/json" },
+  timeout: "10s",   // just for the submit call — it should return immediately
 };
 
 export default function () {
-  const res = http.post(url, payload, params);
+  const submitStart = Date.now();
 
-  latencyTrend.add(res.timings.duration);
+  // 1. Submit — expect 202 immediately
+  const submitRes = http.post(`${BASE_URL}/execute`, payload, params);
 
-  const success = check(res, {
-    "status is 200": (r) => r.status === 200,
+  const submitted = check(submitRes, {
+    "submit status 202": (r) => r.status === 202,
+    "got job_id": (r) => {
+      try { return !!JSON.parse(r.body).job_id; } catch { return false; }
+    },
+  });
+
+  if (!submitted) {
+    failureRate.add(1);
+    return;
+  }
+
+  const jobId = JSON.parse(submitRes.body).job_id;
+
+  // 2. Poll until done (max 120 s, poll every 500 ms)
+  const pollParams = { timeout: "5s" };
+  let verdict = null;
+
+  for (let i = 0; i < 240; i++) {
+    sleep(0.5);
+    const r = http.get(`${BASE_URL}/result/${jobId}`, pollParams);
+
+    if (r.status !== 200) continue;
+
+    let body;
+    try { body = JSON.parse(r.body); } catch { continue; }
+
+    if (body.status === "done") {
+      verdict = body.result?.verdict;
+      break;
+    }
+  }
+
+  const elapsed = Date.now() - submitStart;
+  e2eLatency.add(elapsed);
+
+  const success = check({ verdict }, {
+    "verdict is accepted": (v) => v.verdict === "accepted",
   });
 
   failureRate.add(!success);

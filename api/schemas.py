@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Literal, Union
+from typing import Any, Dict, List, Literal, Union
 
 
 # -------------------------
@@ -45,12 +45,12 @@ class ExecuteRequest(StrictBaseModel):
     test_cases: List[TestCase] = Field(
         ...,
         min_length=1,
-        max_length=20
+        max_length=20,
     )
 
 
 # -------------------------
-# Response Models
+# Execution Result Models
 # -------------------------
 
 class AcceptedResponse(StrictBaseModel):
@@ -75,20 +75,36 @@ class CompilationErrorResponse(StrictBaseModel):
     verdict: Literal["compilation_error"]
     error_message: str = Field(..., max_length=1000)
 
+
 class TimeoutResponse(StrictBaseModel):
     verdict: Literal["timeout"]
     failed_test_case_index: int = Field(..., ge=0)
 
 
+class ErrorResponse(StrictBaseModel):
+    verdict: Literal["error"]
+    error_message: str
 
-# -------------------------
-# Unified Response Type
-# -------------------------
 
 ExecuteResponse = Union[
     AcceptedResponse,
     WrongAnswerResponse,
     RuntimeErrorResponse,
     CompilationErrorResponse,
-    TimeoutResponse
+    TimeoutResponse,
+    ErrorResponse,
 ]
+
+
+# -------------------------
+# Async Job Models
+# -------------------------
+
+class SubmitResponse(BaseModel):
+    job_id: str
+    status: Literal["queued"]
+
+
+class JobResultResponse(BaseModel):
+    status: Literal["queued", "running", "done"]
+    result: ExecuteResponse | None = None
