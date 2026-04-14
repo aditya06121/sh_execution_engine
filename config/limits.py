@@ -7,8 +7,8 @@ TS_COMPILE_TIMEOUT_SECONDS = 15       # was 30
 
 # Docker resource limits
 # Reduced: allows 4× more containers on the same host
-DOCKER_MEMORY_LIMIT = "256m"          # was 1024m
-DOCKER_MEMORY_SWAP = "256m"           # was 1024m  (no swap, keeps pressure visible)
+DOCKER_MEMORY_LIMIT = "512m"          # was 256m; cc1plus needs ~300-500 MB for C++
+DOCKER_MEMORY_SWAP = "512m"           # match limit (no extra swap)
 DOCKER_CPU_LIMIT = "0.5"              # was 2
 DOCKER_PIDS_LIMIT = "64"              # was 1536  (typical solutions need <20)
 DOCKER_NOFILE_LIMIT = "1024"          # was 65535

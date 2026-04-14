@@ -5,7 +5,7 @@ import redis.exceptions
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from .schemas import ExecuteRequest, SubmitResponse, JobResultResponse
+from .schemas import ExecuteRequest
 from jobqueue.job import enqueue, get_job_status, queue_depth
 from execution.pipeline import ExecutionPipeline
 from config.limits import FALLBACK_MAX_CONCURRENT
@@ -31,30 +31,50 @@ _REDIS_ERRORS = (
 # POST /execute
 # ---------------------------------------------------------------------------
 
+_POLL_INTERVAL = 0.2   # seconds between internal result checks
+_EXECUTE_TIMEOUT = 120  # seconds before giving up
+
+
 @app.post("/execute")
 async def execute(req: ExecuteRequest):
     """
-    Normal path  (Redis up)   → 202 + {job_id, status:"queued"}
-                                Poll GET /result/{job_id} for the verdict.
-    Fallback path (Redis down) → 200 + verdict payload directly (synchronous).
+    Enqueues the job into Redis, waits internally for the worker to finish,
+    then returns the verdict directly.  Clients make one request and get one
+    response — no polling required.
+
+    Fallback path (Redis down) → runs the job synchronously in-process.
     """
     try:
         job_id = await enqueue(req.model_dump())
-        return JSONResponse(
-            status_code=202,
-            content={"job_id": job_id, "status": "queued"},
-        )
-
     except OverflowError:
         raise HTTPException(
             status_code=503,
             detail="Queue at capacity — try again shortly",
             headers={"Retry-After": "5"},
         )
-
     except _REDIS_ERRORS as exc:
         log.warning("Redis unavailable (%s), falling back to direct execution", exc)
         return await _execute_direct(req)
+
+    # Internal poll — invisible to the caller
+    elapsed = 0.0
+    while elapsed < _EXECUTE_TIMEOUT:
+        await asyncio.sleep(_POLL_INTERVAL)
+        elapsed += _POLL_INTERVAL
+
+        try:
+            data = await get_job_status(job_id)
+        except _REDIS_ERRORS as exc:
+            log.warning("Redis unavailable while waiting for job %s: %s", job_id, exc)
+            raise HTTPException(status_code=503, detail="Result store unavailable")
+
+        if data is None:
+            raise HTTPException(status_code=404, detail="Job not found — it may have expired")
+
+        if data.get("status") == "done":
+            return JSONResponse(status_code=200, content=data["result"])
+
+    raise HTTPException(status_code=504, detail="Execution timed out")
 
 
 async def _execute_direct(req: ExecuteRequest) -> JSONResponse:
@@ -79,34 +99,6 @@ async def _execute_direct(req: ExecuteRequest) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc))
     finally:
         _fallback_sem.release()
-
-
-# ---------------------------------------------------------------------------
-# GET /result/{job_id}
-# ---------------------------------------------------------------------------
-
-@app.get("/result/{job_id}", response_model=JobResultResponse)
-async def result(job_id: str):
-    """
-    status == "queued"  → waiting for a worker
-    status == "running" → being executed now
-    status == "done"    → finished; see the `result` field for the verdict
-    """
-    try:
-        data = await get_job_status(job_id)
-    except _REDIS_ERRORS as exc:
-        log.warning("Redis unavailable when fetching result: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="Result store unavailable — Redis is down",
-        )
-
-    if data is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Job not found — it may have expired (results live for 10 minutes)",
-        )
-    return data
 
 
 # ---------------------------------------------------------------------------
