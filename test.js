@@ -59,7 +59,7 @@ const MAX_POLLS    = Math.floor((MAX_POLL_SECONDS * 1000) / POLL_INTERVAL_MS);
 
 const SUBMIT_PARAMS = {
   headers: { "Content-Type": "application/json" },
-  timeout: "10s",   // submit must be fast; fail fast if API is down
+  timeout: "120s",  // allow for synchronous fallback execution (Redis-down path)
 };
 
 const POLL_PARAMS = {
@@ -90,12 +90,42 @@ export default function () {
   const submitRes = http.post(`${BASE_URL}/execute`, PAYLOAD, SUBMIT_PARAMS);
   submitLatency.add(Date.now() - wallStart);
 
+  // ------------------------------------------------------------------
+  // 2a. Synchronous fallback path: server returned verdict directly (200)
+  //     This happens when Redis is down and the server runs the job inline.
+  // ------------------------------------------------------------------
+  if (submitRes.status === 200) {
+    e2eLatency.add(Date.now() - wallStart);
+    pollCount.add(0);
+
+    let body;
+    try { body = JSON.parse(submitRes.body); } catch (_) {
+      failureRate.add(1);
+      return;
+    }
+
+    const verdict = body.verdict ?? null;
+    if (verdict === "error" &&
+        (body.error_message ?? "").includes("expired")) {
+      jobsExpired.add(1);
+    }
+
+    const success = check({ verdict }, {
+      "verdict accepted": (v) => v.verdict === "accepted",
+    });
+    failureRate.add(!success);
+    return;
+  }
+
+  // ------------------------------------------------------------------
+  // 2b. Async path: server queued the job (202) — poll for result
+  // ------------------------------------------------------------------
   const submitOk = check(submitRes, {
     "submit → 202": (r) => r.status === 202,
   });
 
   if (!submitOk) {
-    // API returned non-202 (could be 503 queue-full or a real error)
+    // Non-200/202 (e.g. 503 queue-full)
     failureRate.add(1);
     return;
   }
@@ -114,7 +144,7 @@ export default function () {
   }
 
   // ------------------------------------------------------------------
-  // 2. Poll until done
+  // 3. Poll until done
   // ------------------------------------------------------------------
   let polls   = 0;
   let verdict = null;
@@ -154,7 +184,7 @@ export default function () {
   }
 
   // ------------------------------------------------------------------
-  // 3. Validate verdict
+  // 4. Validate verdict
   // ------------------------------------------------------------------
   const success = check({ verdict }, {
     "verdict accepted": (v) => v.verdict === "accepted",
