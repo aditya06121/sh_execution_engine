@@ -21,4 +21,5 @@ MAX_COMPILE_ERROR_BYTES = 1000        # cap compiler error messages
 CONTAINER_SLEEP_SECONDS = 60
 
 # Concurrency
-MAX_CONCURRENT_EXECUTIONS = 25
+MAX_CONCURRENT_EXECUTIONS = 60
+QUEUE_TIMEOUT_SECONDS = 120       # max time a request can wait in queue before 503

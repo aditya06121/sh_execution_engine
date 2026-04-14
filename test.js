@@ -1,5 +1,11 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
+import { Trend, Counter, Rate } from "k6/metrics";
+
+// --- Custom metrics ---
+const failureRate = new Rate("failures");
+const errorCount = new Counter("error_count");
+const latencyTrend = new Trend("latency");
 
 export const options = {
   scenarios: {
@@ -14,10 +20,15 @@ export const options = {
         { duration: "1m", target: 100 },
         { duration: "1m", target: 120 },
         { duration: "1m", target: 140 },
-        { duration: "1m", target: 150 }, // final step adjusted
+        { duration: "1m", target: 150 },
       ],
       gracefulRampDown: "30s",
     },
+  },
+
+  thresholds: {
+    failures: ["rate<0.1"], // fail if >10% failures
+    latency: ["p(95)<2000"], // 95% under 2s
   },
 };
 
@@ -45,10 +56,30 @@ const params = {
 export default function () {
   const res = http.post(url, payload, params);
 
-  check(res, {
-    "status is 200": (r) => r.status === 200,
-    "response time < 2s": (r) => r.timings.duration < 2000,
+  const success = check(res, {
+    "status 200": (r) => r.status === 200,
+    "latency < 2s": (r) => r.timings.duration < 2000,
   });
+
+  // --- Metrics collection ---
+  latencyTrend.add(res.timings.duration);
+  failureRate.add(!success);
+
+  if (!success) {
+    errorCount.add(1);
+
+    // Critical: log with VU + iteration context
+    console.error(
+      `FAIL | VU=${__VU} ITER=${__ITER} STATUS=${res.status} TIME=${res.timings.duration}ms BODY=${res.body}`,
+    );
+  }
+
+  // Optional: periodic debug logs (not every request)
+  if (__ITER % 50 === 0) {
+    console.log(
+      `INFO | VU=${__VU} ITER=${__ITER} STATUS=${res.status} TIME=${res.timings.duration}ms`,
+    );
+  }
 
   sleep(1);
 }
