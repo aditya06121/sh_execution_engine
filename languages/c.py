@@ -167,11 +167,28 @@ class CExecutor(BaseExecutor):
     def _generate_wrapper(self):
 
         return_type, params = self._parse_signature()
+        is_void = return_type == "void"
+
+        # For void functions, identify the output array parameter.
+        # Convention: prefer a param named "result"/"output"/"ans"/"out";
+        # fall back to the last array/pointer parameter.
+        output_param = None
+        if is_void:
+            array_params = [(pt, pn) for pt, pn in params if pt in ("int[]", "int*")]
+            named_out = [(pt, pn) for pt, pn in array_params
+                         if pn.lower() in ("result", "output", "out", "ans")]
+            output_param = named_out[-1] if named_out else (array_params[-1] if array_params else None)
 
         param_deserialization = []
         param_names = []
+        first_input_array_size: str | None = None   # used to size the output buffer
 
         for param_type, param_name in params:
+
+            # Output buffer for void functions — allocated below, not from JSON
+            if is_void and output_param and (param_type, param_name) == output_param:
+                param_names.append(param_name)
+                continue
 
             clean_type = param_type.replace("const", "").strip()
 
@@ -184,6 +201,14 @@ class CExecutor(BaseExecutor):
             elif clean_type == "double":
                 param_deserialization.append(f'double {param_name} = j["{param_name}"];')
 
+            elif clean_type in ("int[]", "int*"):
+                param_deserialization.append(
+                    f'vector<int> {param_name}_vec = j["{param_name}"].get<vector<int>>();'
+                )
+                param_deserialization.append(f'int* {param_name} = {param_name}_vec.data();')
+                if first_input_array_size is None:
+                    first_input_array_size = f"{param_name}_vec.size()"
+
             elif clean_type == "char*":
                 param_deserialization.append(f'string {param_name}_tmp = j["{param_name}"];')
                 param_deserialization.append(f'char* {param_name} = (char*){param_name}_tmp.c_str();')
@@ -193,21 +218,42 @@ class CExecutor(BaseExecutor):
 
             param_names.append(param_name)
 
-        return_serialization = "output = result;"
+        # Allocate the output buffer (void functions only)
+        if is_void and output_param:
+            out_type, out_name = output_param
+            size_expr = first_input_array_size or "0"
+            param_deserialization.append(f'vector<int> {out_name}_vec({size_expr});')
+            param_deserialization.append(f'int* {out_name} = {out_name}_vec.data();')
+
+        # Function call and return serialization differ for void vs non-void
+        if is_void:
+            function_call = f'{self.function_name}({", ".join(param_names)});'
+            if output_param:
+                out_name = output_param[1]
+                return_serialization = f'output = json({out_name}_vec);'
+            else:
+                return_serialization = 'output = nullptr;'
+        else:
+            function_call = f'auto result = {self.function_name}({", ".join(param_names)});'
+            return_serialization = "output = result;"
+
+        # Build forward declaration using normalised types (int[] → int*)
+        def decl_param(pt: str, pn: str) -> str:
+            t = pt if pt not in ("int[]",) else "int*"
+            return f"{t} {pn}"
+
+        forward_decl = (
+            f"{return_type} {self.function_name}"
+            f"({', '.join(decl_param(pt, pn) for pt, pn in params)});"
+        )
 
         wrapper = C_WRAPPER_TEMPLATE \
-            .replace(
-                "__FUNCTION_SIGNATURE_PLACEHOLDER__",
-                f"{return_type} {self.function_name}({', '.join([f'{t} {n}' for t, n in params])});",
-            ) \
+            .replace("__FUNCTION_SIGNATURE_PLACEHOLDER__", forward_decl) \
             .replace(
                 "__PARAMETER_DESERIALIZATION_PLACEHOLDER__",
                 "\n        ".join(param_deserialization),
             ) \
-            .replace(
-                "__FUNCTION_CALL_PLACEHOLDER__",
-                f"auto result = {self.function_name}({', '.join(param_names)});",
-            ) \
+            .replace("__FUNCTION_CALL_PLACEHOLDER__", function_call) \
             .replace("__RETURN_SERIALIZATION_PLACEHOLDER__", return_serialization) \
             .replace("__USER_CODE_PLACEHOLDER__", self.code)
 
@@ -235,8 +281,18 @@ class CExecutor(BaseExecutor):
 
             for p in raw_params:
                 parts = p.split()
-                param_name = parts[-1].replace("&", "").replace("*", "")
-                param_type = " ".join(parts[:-1])
-                params.append((param_type.strip(), param_name.strip()))
+                raw_name = parts[-1]
+
+                # Strip array brackets and pointer markers from the name;
+                # if the name carried [], promote the type to int[]
+                is_array = "[]" in raw_name
+                param_name = raw_name.replace("&", "").replace("*", "") \
+                                     .replace("[", "").replace("]", "")
+                param_type = " ".join(parts[:-1]).replace("&", "").strip()
+
+                if is_array and "[]" not in param_type and "*" not in param_type:
+                    param_type = param_type + "[]"
+
+                params.append((param_type, param_name))
 
         return return_type, params
