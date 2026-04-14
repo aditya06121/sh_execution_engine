@@ -31,7 +31,7 @@ class CSharpExecutor(BaseExecutor):
     IMAGE_NAME = "csharp-sandbox:latest"
 
     # 🔒 Safe limits for .NET SDK
-    SAFE_PIDS_LIMIT = "512"
+    SAFE_PIDS_LIMIT = "1536"
     SAFE_NOFILE_LIMIT = "65535"
 
     def __init__(self, code: str, function_name: str):

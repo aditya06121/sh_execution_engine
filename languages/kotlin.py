@@ -27,8 +27,8 @@ class KotlinExecutor(BaseExecutor):
 
     IMAGE_NAME = "java-sandbox:latest"  # same image (has kotlinc + JDK)
     COMPILATION_TIMEOUT_SECONDS = 120
-    KOTLIN_CPU_LIMIT = "2.0"
-    KOTLIN_MEMORY_LIMIT = "1024m"
+    KOTLIN_CPU_LIMIT = "4.0"
+    KOTLIN_MEMORY_LIMIT = "1536m"
     KOTLIN_CONTAINER_SLEEP_SECONDS = 60
 
     def __init__(self, code: str, function_name: str):
