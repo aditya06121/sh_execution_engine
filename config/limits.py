@@ -25,3 +25,7 @@ CONTAINER_SLEEP_SECONDS = 60
 # Worker concurrency — slots per worker process
 # Run multiple worker.py processes to scale out horizontally.
 WORKER_CONCURRENCY = 10
+
+# Fallback concurrency used when Redis is unavailable.
+# Requests are executed synchronously under this semaphore instead of queued.
+FALLBACK_MAX_CONCURRENT = 20
