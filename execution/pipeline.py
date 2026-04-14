@@ -11,29 +11,26 @@ class ExecutionPipeline:
         self.request = request
         self.executor = None
 
-    def execute(self) -> dict:
+    async def execute(self) -> dict:
         try:
-            # Create executor
             self.executor = ExecutorFactory.get_executor(
                 self.request["language"],
                 self.request["source_code"],
                 self.request["function_name"],
             )
 
-            # Compile phase
             try:
-                self.executor.compile()
+                await self.executor.compile()
             except (CompileError, RuntimeExecutionError) as e:
                 return {
                     "verdict": "compilation_error",
                     "error_message": str(e),
                 }
 
-            # Run tests
             actual_outputs = []
             for index, tc in enumerate(self.request["test_cases"]):
                 try:
-                    output = self.executor.run(tc["input"])
+                    output = await self.executor.run(tc["input"])
                 except RuntimeExecutionError as e:
                     return {
                         "verdict": "runtime_error",
@@ -58,4 +55,4 @@ class ExecutionPipeline:
 
         finally:
             if self.executor:
-                self.executor.cleanup()
+                await self.executor.cleanup()

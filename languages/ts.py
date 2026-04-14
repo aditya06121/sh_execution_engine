@@ -1,4 +1,4 @@
-import subprocess
+import asyncio
 import tempfile
 import os
 import json
@@ -29,6 +29,9 @@ from config.limits import (
 
 from .ts_wrapper import TS_WRAPPER_TEMPLATE
 
+PIPE = asyncio.subprocess.PIPE
+DEVNULL = asyncio.subprocess.DEVNULL
+
 
 class TypeScriptExecutor(BaseExecutor):
 
@@ -45,169 +48,132 @@ class TypeScriptExecutor(BaseExecutor):
     # Compile Phase
     # =============================
 
-    def compile(self):
+    async def compile(self):
 
         container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
-        # Create isolated temp directory
         self.temp_dir = tempfile.mkdtemp(dir=container_sandbox_root)
         self.host_temp_dir = build_host_temp_dir(host_sandbox_root, self.temp_dir)
 
-        # Write wrapped TypeScript file
         self.file_path = os.path.join(self.temp_dir, "main.ts")
 
-        wrapped_code = TS_WRAPPER_TEMPLATE.replace(
-            "{source_code}", self.code
-        )
+        wrapped_code = TS_WRAPPER_TEMPLATE.replace("{source_code}", self.code)
 
         with open(self.file_path, "w") as f:
             f.write(wrapped_code)
 
-        # Start sandbox container (sleep mode)
         run_cmd = [
             "docker", "run",
-            "-d",
-            "--rm",
-
+            "-d", "--rm",
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
-
             "--cpus", TS_CPU_LIMIT,
-
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
-
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
-
             "-v", f"{self.host_temp_dir}:/app",
             "-w", "/app",
-
             self.IMAGE_NAME,
-            "sleep", str(CONTAINER_SLEEP_SECONDS)
+            "sleep", str(CONTAINER_SLEEP_SECONDS),
         ]
 
-        try:
-            self.container_id = subprocess.check_output(
-                run_cmd
-            ).decode().strip()
-        except subprocess.CalledProcessError:
+        proc = await asyncio.create_subprocess_exec(*run_cmd, stdout=PIPE, stderr=PIPE)
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
             raise RuntimeExecutionError("Failed to start execution container")
-
-        # -------------------------
-        # TypeScript Compilation
-        # -------------------------
+        self.container_id = stdout.decode().strip()
 
         compile_cmd = [
-            "docker", "exec",
-            self.container_id,
-            "tsc",
-            "main.ts",
+            "docker", "exec", self.container_id,
+            "tsc", "main.ts",
             "--target", "ES2020",
             "--module", "commonjs",
             "--lib", "ES2020",
-            "--skipLibCheck"
+            "--skipLibCheck",
         ]
 
+        proc = await asyncio.create_subprocess_exec(*compile_cmd, stdout=PIPE, stderr=PIPE)
         try:
-            process = subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                timeout=TS_COMPILE_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            self.cleanup()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TS_COMPILE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await self.cleanup()
             raise CompileError("Compilation timed out")
 
-        if process.returncode != 0:
-            error_message = (process.stderr or process.stdout or "").strip()
-
+        if proc.returncode != 0:
+            error_message = (stderr.decode() or stdout.decode() or "").strip()
             if len(error_message) > MAX_COMPILE_ERROR_BYTES:
                 error_message = error_message[:MAX_COMPILE_ERROR_BYTES]
+            await self.cleanup()
+            raise CompileError(error_message or "TypeScript compilation failed")
 
-            self.cleanup()
-            raise CompileError(
-                error_message or "TypeScript compilation failed"
-            )
-
-        # Ensure compiled JS exists
-        js_check = subprocess.run(
-            ["docker", "exec", self.container_id, "test", "-f", "main.js"]
+        # Verify compiled JS exists
+        check_proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", self.container_id, "test", "-f", "main.js",
+            stdout=DEVNULL, stderr=DEVNULL,
         )
-
-        if js_check.returncode != 0:
-            self.cleanup()
+        await check_proc.wait()
+        if check_proc.returncode != 0:
+            await self.cleanup()
             raise CompileError("Compilation failed: main.js not generated")
 
     # =============================
     # Run Phase
     # =============================
 
-    def run(self, test_input: dict):
+    async def run(self, test_input: dict):
 
         if not self.container_id:
             raise RuntimeExecutionError("Container not initialized")
 
-        payload = json.dumps({
-            "function_name": self.function_name,
-            "input": test_input
-        })
+        payload = json.dumps({"function_name": self.function_name, "input": test_input}).encode()
 
-        exec_cmd = [
-            "docker", "exec",
-            "-i",
-            self.container_id,
-            "node", "main.js"
-        ]
+        exec_cmd = ["docker", "exec", "-i", self.container_id, "node", "main.js"]
 
+        proc = await asyncio.create_subprocess_exec(*exec_cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
         try:
-            process = subprocess.run(
-                exec_cmd,
-                input=payload,
-                text=True,
-                capture_output=True,
-                timeout=EXECUTION_TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
-            self.cleanup()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(payload), timeout=EXECUTION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await self.cleanup()
             raise RuntimeExecutionError("Execution timed out")
 
-        # Enforce stdout size limit
-        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
-            self.cleanup()
+        stdout_str = stdout.decode()
+
+        if len(stdout_str.encode("utf-8")) > MAX_STDOUT_BYTES:
+            await self.cleanup()
             raise RuntimeExecutionError("Output limit exceeded")
 
-        if process.returncode != 0:
+        if proc.returncode != 0:
             try:
-                error_json = json.loads(process.stdout)
-                message = error_json.get("error", "Runtime error")
+                message = json.loads(stdout_str).get("error", "Runtime error")
             except Exception:
-                message = process.stderr.strip() or "Runtime error"
-
-            self.cleanup()
+                message = stderr.decode().strip() or "Runtime error"
+            await self.cleanup()
             raise RuntimeExecutionError(message)
 
         try:
-            result_json = json.loads(process.stdout)
-            return result_json["result"]
+            return json.loads(stdout_str)["result"]
         except Exception:
-            self.cleanup()
+            await self.cleanup()
             raise RuntimeExecutionError("Invalid output format")
 
     # =============================
     # Cleanup Phase
     # =============================
 
-    def cleanup(self):
+    async def cleanup(self):
 
         if self.container_id:
-            subprocess.run(
-                ["docker", "rm", "-f", self.container_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", self.container_id,
+                stdout=DEVNULL, stderr=DEVNULL,
             )
+            await proc.wait()
             self.container_id = None
 
         if self.temp_dir:

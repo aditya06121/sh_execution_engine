@@ -1,8 +1,8 @@
+import asyncio
 import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from typing import List, Tuple
 
@@ -30,6 +30,9 @@ from config.limits import (
 
 from .go_wrapper import GO_WRAPPER_TEMPLATE
 
+PIPE = asyncio.subprocess.PIPE
+DEVNULL = asyncio.subprocess.DEVNULL
+
 
 class GoExecutor(BaseExecutor):
 
@@ -46,7 +49,7 @@ class GoExecutor(BaseExecutor):
     # Compile Phase
     # -------------------------
 
-    def compile(self):
+    async def compile(self):
 
         container_sandbox_root, host_sandbox_root = get_sandbox_roots()
 
@@ -61,105 +64,78 @@ class GoExecutor(BaseExecutor):
 
         run_cmd = [
             "docker", "run",
-            "-d",
-            "--rm",
-
+            "-d", "--rm",
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
-
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
-
             "-v", f"{self.host_temp_dir}:/app",
             "-w", "/app",
-
             self.IMAGE_NAME,
-            "sleep", str(CONTAINER_SLEEP_SECONDS)
+            "sleep", str(CONTAINER_SLEEP_SECONDS),
         ]
 
-        try:
-            self.container_id = subprocess.check_output(run_cmd).decode().strip()
-        except subprocess.CalledProcessError:
+        proc = await asyncio.create_subprocess_exec(*run_cmd, stdout=PIPE, stderr=PIPE)
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
             raise RuntimeExecutionError("Failed to start execution container")
+        self.container_id = stdout.decode().strip()
 
         compile_cmd = [
-            "docker", "exec",
-            self.container_id,
-            "go",
-            "build",
-            "-buildvcs=false",
-            "-trimpath",
-            "-o",
-            "main",
-            "main.go"
+            "docker", "exec", self.container_id,
+            "go", "build", "-buildvcs=false", "-trimpath", "-o", "main", "main.go",
         ]
 
+        proc = await asyncio.create_subprocess_exec(*compile_cmd, stdout=PIPE, stderr=PIPE)
         try:
-            compile_proc = subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                timeout=COMPILATION_TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=COMPILATION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
             raise CompileError("Compilation timed out")
 
-        if compile_proc.returncode != 0:
-            raise CompileError(
-                compile_proc.stderr.strip() or "Compilation failed"
-            )
+        if proc.returncode != 0:
+            raise CompileError(stderr.decode().strip() or "Compilation failed")
 
     # -------------------------
     # Run Phase
     # -------------------------
 
-    def run(self, test_input: dict):
+    async def run(self, test_input: dict):
 
         if not self.container_id:
             raise RuntimeExecutionError("Container not initialized")
 
-        payload = json.dumps({
-            "function_name": self.function_name,
-            "input": test_input
-        })
+        payload = json.dumps({"function_name": self.function_name, "input": test_input}).encode()
 
-        exec_cmd = [
-            "docker", "exec",
-            "-i",
-            self.container_id,
-            "./main"
-        ]
+        exec_cmd = ["docker", "exec", "-i", self.container_id, "./main"]
 
+        proc = await asyncio.create_subprocess_exec(*exec_cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
         try:
-            process = subprocess.run(
-                exec_cmd,
-                input=payload,
-                text=True,
-                capture_output=True,
-                timeout=EXECUTION_TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(payload), timeout=EXECUTION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
             raise RuntimeExecutionError("Execution timed out")
 
-        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
+        stdout_str = stdout.decode()
+
+        if len(stdout_str.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 
-        if process.returncode != 0:
+        if proc.returncode != 0:
             try:
-                error_json = json.loads(process.stdout)
-                message = error_json.get("error", "Runtime error")
+                message = json.loads(stdout_str).get("error", "Runtime error")
             except Exception:
-                message = process.stderr or "Runtime error"
-
+                message = stderr.decode() or "Runtime error"
             raise RuntimeExecutionError(message)
 
         try:
-            result_json = json.loads(process.stdout)
-            return result_json["result"]
+            return json.loads(stdout_str)["result"]
         except Exception:
             raise RuntimeExecutionError("Invalid output format")
 
@@ -167,14 +143,14 @@ class GoExecutor(BaseExecutor):
     # Cleanup Phase
     # -------------------------
 
-    def cleanup(self):
+    async def cleanup(self):
 
         if self.container_id:
-            subprocess.run(
-                ["docker", "rm", "-f", self.container_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", self.container_id,
+                stdout=DEVNULL, stderr=DEVNULL,
             )
+            await proc.wait()
             self.container_id = None
 
         if self.temp_dir:

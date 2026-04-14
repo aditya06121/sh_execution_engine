@@ -1,8 +1,8 @@
+import asyncio
 import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 
 from config.limits import (
@@ -22,6 +22,9 @@ from execution.sandbox_paths import build_host_temp_dir, get_sandbox_roots
 
 from .rust_wrapper import RUST_WRAPPER_TEMPLATE
 
+PIPE = asyncio.subprocess.PIPE
+DEVNULL = asyncio.subprocess.DEVNULL
+
 
 class RustExecutor(BaseExecutor):
 
@@ -39,25 +42,17 @@ class RustExecutor(BaseExecutor):
     # Compile Phase
     # ==========================================================
 
-    def compile(self):
+    async def compile(self):
 
         container_root, host_root = get_sandbox_roots()
 
         self.temp_dir = tempfile.mkdtemp(dir=container_root)
-
-        self.host_temp_dir = build_host_temp_dir(
-            host_root,
-            self.temp_dir
-        )
+        self.host_temp_dir = build_host_temp_dir(host_root, self.temp_dir)
 
         wrapped_code = self._generate_wrapper()
 
         if "__PLACEHOLDER__" in wrapped_code or "__FUNCTION_" in wrapped_code:
             raise CompileError("Wrapper placeholder replacement failed")
-
-        # ------------------------------------------------------
-        # Create Cargo project
-        # ------------------------------------------------------
 
         src_dir = os.path.join(self.temp_dir, "src")
         os.makedirs(src_dir, exist_ok=True)
@@ -74,11 +69,9 @@ edition = "2021"
 [dependencies]
 serde_json = "1"
 """
-
         with open(os.path.join(self.temp_dir, "Cargo.toml"), "w") as f:
             f.write(cargo_toml)
 
-        # Reuse vendored crates from image so we do not copy large trees per run.
         cargo_config_dir = os.path.join(self.temp_dir, ".cargo")
         os.makedirs(cargo_config_dir, exist_ok=True)
         cargo_config = f"""[source.crates-io]
@@ -90,105 +83,82 @@ directory = "{self.VENDORED_SOURCE_DIR}"
         with open(os.path.join(cargo_config_dir, "config.toml"), "w") as f:
             f.write(cargo_config)
 
-        # ------------------------------------------------------
-        # Start container
-        # ------------------------------------------------------
-
         run_cmd = [
             "docker", "run",
-            "-d",
-            "--rm",
-
+            "-d", "--rm",
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
-
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
-
             "-v", f"{self.host_temp_dir}:/app",
             "-w", "/app",
-
             self.IMAGE_NAME,
-            "sleep", str(CONTAINER_SLEEP_SECONDS)
+            "sleep", str(CONTAINER_SLEEP_SECONDS),
         ]
 
-        try:
-            self.container_id = subprocess.check_output(run_cmd).decode().strip()
-        except subprocess.CalledProcessError:
+        proc = await asyncio.create_subprocess_exec(*run_cmd, stdout=PIPE, stderr=PIPE)
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
             raise RuntimeExecutionError("Failed to start Rust container")
-
-        # ------------------------------------------------------
-        # Compile (offline, reusing shared target cache in image)
-        # ------------------------------------------------------
+        self.container_id = stdout.decode().strip()
 
         compile_cmd = [
-            "docker", "exec",
-            self.container_id,
-            "cargo",
-            "build",
-            "--release",
-            "--offline",
-            "--target-dir",
-            self.SHARED_TARGET_DIR,
+            "docker", "exec", self.container_id,
+            "cargo", "build", "--release", "--offline",
+            "--target-dir", self.SHARED_TARGET_DIR,
         ]
 
+        proc = await asyncio.create_subprocess_exec(*compile_cmd, stdout=PIPE, stderr=PIPE)
         try:
-            result = subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                timeout=COMPILATION_TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=COMPILATION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
             raise CompileError("Compilation timed out")
 
-        if result.returncode != 0:
-            error = result.stderr.strip()[:1000]
-            raise CompileError(error)
+        if proc.returncode != 0:
+            raise CompileError(stderr.decode().strip()[:1000])
 
     # ==========================================================
     # Run Phase
     # ==========================================================
 
-    def run(self, test_input: dict):
+    async def run(self, test_input: dict):
 
         if not self.container_id:
             raise RuntimeExecutionError("Container not initialized")
 
-        payload = json.dumps(test_input, separators=(",", ":"))
+        payload = json.dumps(test_input, separators=(",", ":")).encode()
 
         exec_cmd = [
-            "docker", "exec",
-            "-i",
-            self.container_id,
-            f"{self.SHARED_TARGET_DIR}/release/runner"
+            "docker", "exec", "-i", self.container_id,
+            f"{self.SHARED_TARGET_DIR}/release/runner",
         ]
 
+        proc = await asyncio.create_subprocess_exec(*exec_cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
         try:
-            process = subprocess.run(
-                exec_cmd,
-                input=payload,
-                text=True,
-                capture_output=True,
-                timeout=EXECUTION_TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(payload), timeout=EXECUTION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
             raise RuntimeExecutionError("Execution timed out")
 
-        if len(process.stdout.encode("utf-8")) > MAX_STDOUT_BYTES:
+        stdout_str = stdout.decode()
+
+        if len(stdout_str.encode("utf-8")) > MAX_STDOUT_BYTES:
             raise RuntimeExecutionError("Output limit exceeded")
 
-        if process.returncode != 0:
+        if proc.returncode != 0:
             raise RuntimeExecutionError(
-                process.stderr.strip() or process.stdout.strip() or "Runtime error"
+                stderr.decode().strip() or stdout_str.strip() or "Runtime error"
             )
 
         try:
-            return json.loads(process.stdout.strip())
+            return json.loads(stdout_str.strip())
         except Exception:
             raise RuntimeExecutionError("Invalid JSON output")
 
@@ -196,14 +166,14 @@ directory = "{self.VENDORED_SOURCE_DIR}"
     # Cleanup
     # ==========================================================
 
-    def cleanup(self):
+    async def cleanup(self):
 
         if self.container_id:
-            subprocess.run(
-                ["docker", "rm", "-f", self.container_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", self.container_id,
+                stdout=DEVNULL, stderr=DEVNULL,
             )
+            await proc.wait()
             self.container_id = None
 
         if self.temp_dir:
@@ -224,10 +194,7 @@ directory = "{self.VENDORED_SOURCE_DIR}"
 
         for param_type, param_name in params:
             normalized_type = self._normalize_type(param_type)
-            binding_code, invocation_arg = self._build_param_binding(
-                normalized_type,
-                param_name
-            )
+            binding_code, invocation_arg = self._build_param_binding(normalized_type, param_name)
             param_deserialization.extend(binding_code)
             function_arguments.append(invocation_arg)
 

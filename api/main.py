@@ -23,10 +23,9 @@ async def execute(req: ExecuteRequest):
         )
 
     try:
-        loop = asyncio.get_running_loop()
         pipeline = ExecutionPipeline(req.model_dump())
         try:
-            return await loop.run_in_executor(None, pipeline.execute)
+            return await pipeline.execute()
         except ValueError:
             raise HTTPException(
                 status_code=400,
