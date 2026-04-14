@@ -30,7 +30,6 @@ jobs:
     runs-on: self-hosted
     env:
       IMAGE: gisul/execution-engine-py:latest
-      CONTAINER: execution-engine
       SANDBOX_HOST_PATH: /run/desktop/mnt/host/c/judge-sandbox
     steps:
       - name: Pull latest image
