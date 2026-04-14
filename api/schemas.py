@@ -94,17 +94,3 @@ ExecuteResponse = Union[
     TimeoutResponse,
     ErrorResponse,
 ]
-
-
-# -------------------------
-# Async Job Models
-# -------------------------
-
-class SubmitResponse(BaseModel):
-    job_id: str
-    status: Literal["queued"]
-
-
-class JobResultResponse(BaseModel):
-    status: Literal["queued", "running", "done"]
-    result: ExecuteResponse | None = None
