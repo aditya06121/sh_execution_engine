@@ -15,13 +15,14 @@ from execution.sandbox_paths import (
 )
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
+    COMPILATION_TIMEOUT_SECONDS,
     DOCKER_MEMORY_LIMIT,
+    DOCKER_MEMORY_SWAP,
     DOCKER_CPU_LIMIT,
     DOCKER_PIDS_LIMIT,
     DOCKER_NOFILE_LIMIT,
     MAX_STDOUT_BYTES,
     CONTAINER_SLEEP_SECONDS,
-    COMPILATION_TIMEOUT_SECONDS,
 )
 
 from .kotlin_wrapper import KOTLIN_WRAPPER_TEMPLATE
@@ -67,7 +68,7 @@ class KotlinExecutor(BaseExecutor):
             "--rm",
 
             "--memory", DOCKER_MEMORY_LIMIT,
-            "--memory-swap", DOCKER_MEMORY_LIMIT,
+            "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",

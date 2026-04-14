@@ -18,6 +18,7 @@ from execution.sandbox_paths import (
 
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
+    COMPILATION_TIMEOUT_SECONDS,
     DOCKER_MEMORY_LIMIT,
     DOCKER_MEMORY_SWAP,
     DOCKER_CPU_LIMIT,
@@ -104,11 +105,15 @@ class CExecutor(BaseExecutor):
             "solution"
         ]
 
-        result = subprocess.run(
-            compile_cmd,
-            capture_output=True,
-            text=True
-        )
+        try:
+            result = subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=COMPILATION_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            raise CompileError("Compilation timed out")
 
         if result.returncode != 0:
             raise CompileError(result.stderr)

@@ -44,8 +44,8 @@ class ExecuteRequest(StrictBaseModel):
 
     test_cases: List[TestCase] = Field(
         ...,
-        min_items=1,
-        max_items=20
+        min_length=1,
+        max_length=20
     )
 
 
@@ -55,6 +55,7 @@ class ExecuteRequest(StrictBaseModel):
 
 class AcceptedResponse(StrictBaseModel):
     verdict: Literal["accepted"]
+    actual_outputs: List[Any]
 
 
 class WrongAnswerResponse(StrictBaseModel):

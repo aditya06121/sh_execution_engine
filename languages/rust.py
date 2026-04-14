@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 
 from config.limits import (
+    COMPILATION_TIMEOUT_SECONDS,
     CONTAINER_SLEEP_SECONDS,
     DOCKER_CPU_LIMIT,
     DOCKER_MEMORY_LIMIT,
@@ -135,11 +136,15 @@ directory = "{self.VENDORED_SOURCE_DIR}"
             self.SHARED_TARGET_DIR,
         ]
 
-        result = subprocess.run(
-            compile_cmd,
-            capture_output=True,
-            text=True
-        )
+        try:
+            result = subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=COMPILATION_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            raise CompileError("Compilation timed out")
 
         if result.returncode != 0:
             error = result.stderr.strip()[:1000]

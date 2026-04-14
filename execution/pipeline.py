@@ -23,13 +23,14 @@ class ExecutionPipeline:
             # Compile phase
             try:
                 self.executor.compile()
-            except CompileError as e:
+            except (CompileError, RuntimeExecutionError) as e:
                 return {
                     "verdict": "compilation_error",
                     "error_message": str(e),
                 }
 
             # Run tests
+            actual_outputs = []
             for index, tc in enumerate(self.request["test_cases"]):
                 try:
                     output = self.executor.run(tc["input"])
@@ -44,11 +45,15 @@ class ExecutionPipeline:
                     return {
                         "verdict": "wrong_answer",
                         "failed_test_case_index": index,
-                        "actual_output": output,                     "expected_output": tc["expected_output"],
+                        "actual_output": output,
+                        "expected_output": tc["expected_output"],
                     }
 
+                actual_outputs.append(output)
+
             return {
-                "verdict": "accepted"
+                "verdict": "accepted",
+                "actual_outputs": actual_outputs,
             }
 
         finally:

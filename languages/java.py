@@ -16,6 +16,7 @@ from execution.sandbox_paths import (
 
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
+    COMPILATION_TIMEOUT_SECONDS,
     DOCKER_MEMORY_LIMIT,
     DOCKER_MEMORY_SWAP,
     DOCKER_CPU_LIMIT,
@@ -104,7 +105,7 @@ class JavaExecutor(BaseExecutor):
                 compile_cmd,
                 capture_output=True,
                 text=True,
-                timeout=EXECUTION_TIMEOUT_SECONDS
+                timeout=COMPILATION_TIMEOUT_SECONDS
             )
         except subprocess.TimeoutExpired:
             raise CompileError("Compilation timed out")
