@@ -8,7 +8,7 @@ QUEUE_KEY = "exec:queue"
 JOB_PREFIX = "exec:job:"
 
 RESULT_TTL = 600     # seconds — clients have 10 min to poll before result expires
-JOB_MAX_AGE = 300    # seconds — worker skips a job that sat in queue longer than this
+JOB_MAX_AGE = 120    # seconds — strictly matches API timeout to prevent execution of abandoned jobs
 MAX_QUEUE_DEPTH = 10_000  # refuse new jobs above this; keeps memory bounded
 
 

@@ -10,9 +10,9 @@ export const options = {
   scenarios: {
     constant_rps: {
       executor: "constant-arrival-rate",
-      rate: 150, 
+      rate: 200, 
       timeUnit: "1s",
-      duration: "5s", 
+      duration: "10s", 
       preAllocatedVUs: 1000,
       maxVUs: 2000,
       gracefulStop: "1m", 
@@ -32,14 +32,20 @@ const SUBMIT_PARAMS = {
   timeout: "120s", 
 };
 
-// Switched to Python. Compiling 20 C++ programs per second requires 
-// massive horizontal scaling. Python skips the heavy compilation phase, 
-// allowing the baseline engine ingestion to be tested effectively.
 const PAYLOAD = JSON.stringify({
-  language: "python",
-  source_code: "def hasCycle(head):\n    slow = fast = head\n    while fast and fast.next:\n        slow = slow.next\n        fast = fast.next.next\n        if slow == fast:\n            return True\n    return False",
-  function_name: "hasCycle",
-  test_cases: [{ input: { head: [1, 2, 3, 4] }, expected_output: false }],
+  language: "cpp",
+  source_code: "int add(int a, int b) { return a + b; }",
+  function_name: "add",
+  test_cases: [
+    {
+      input: { a: 2, b: 3 },
+      expected_output: 5,
+    },
+    {
+      input: { a: -10, b: 4 },
+      expected_output: -6,
+    },
+  ],
 });
 
 export default function () {
