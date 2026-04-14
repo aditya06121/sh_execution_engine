@@ -19,6 +19,8 @@ from config.limits import (
     DOCKER_MEMORY_LIMIT,
     DOCKER_MEMORY_SWAP,
     DOCKER_CPU_LIMIT,
+    DOCKER_PIDS_LIMIT,
+    DOCKER_NOFILE_LIMIT,
     MAX_STDOUT_BYTES,
     CONTAINER_SLEEP_SECONDS,
 )
@@ -29,10 +31,6 @@ from .csharp_wrapper import CSHARP_WRAPPER_TEMPLATE
 class CSharpExecutor(BaseExecutor):
 
     IMAGE_NAME = "csharp-sandbox:latest"
-
-    # 🔒 Safe limits for .NET SDK
-    SAFE_PIDS_LIMIT = "1536"
-    SAFE_NOFILE_LIMIT = "65535"
 
     def __init__(self, code: str, function_name: str):
         super().__init__(code, function_name)
@@ -84,8 +82,8 @@ class CSharpExecutor(BaseExecutor):
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
             "--cpus", DOCKER_CPU_LIMIT,
-            "--pids-limit", self.SAFE_PIDS_LIMIT,
-            "--ulimit", f"nofile={self.SAFE_NOFILE_LIMIT}:{self.SAFE_NOFILE_LIMIT}",
+            "--pids-limit", DOCKER_PIDS_LIMIT,
+            "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
 
             "--network", "none",
             "--cap-drop", "ALL",

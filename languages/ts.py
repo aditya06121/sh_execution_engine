@@ -21,7 +21,10 @@ from config.limits import (
     DOCKER_PIDS_LIMIT,
     DOCKER_NOFILE_LIMIT,
     MAX_STDOUT_BYTES,
+    MAX_COMPILE_ERROR_BYTES,
     CONTAINER_SLEEP_SECONDS,
+    TS_CPU_LIMIT,
+    TS_COMPILE_TIMEOUT_SECONDS,
 )
 
 from .ts_wrapper import TS_WRAPPER_TEMPLATE
@@ -30,12 +33,6 @@ from .ts_wrapper import TS_WRAPPER_TEMPLATE
 class TypeScriptExecutor(BaseExecutor):
 
     IMAGE_NAME = "js-sandbox:latest"
-
-    # Separate timeout for compilation
-    COMPILE_TIMEOUT_SECONDS = 10
-
-    # Prevent huge compiler error from crashing FastAPI validation
-    MAX_COMPILE_ERROR_BYTES = 1000
 
     def __init__(self, code: str, function_name: str):
         super().__init__(code, function_name)
@@ -75,8 +72,7 @@ class TypeScriptExecutor(BaseExecutor):
             "--memory", DOCKER_MEMORY_LIMIT,
             "--memory-swap", DOCKER_MEMORY_SWAP,
 
-            # Give full CPU for compilation speed
-            "--cpus", "1",
+            "--cpus", TS_CPU_LIMIT,
 
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
@@ -119,7 +115,7 @@ class TypeScriptExecutor(BaseExecutor):
                 compile_cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.COMPILE_TIMEOUT_SECONDS,
+                timeout=TS_COMPILE_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
             self.cleanup()
@@ -128,8 +124,8 @@ class TypeScriptExecutor(BaseExecutor):
         if process.returncode != 0:
             error_message = (process.stderr or process.stdout or "").strip()
 
-            if len(error_message) > self.MAX_COMPILE_ERROR_BYTES:
-                error_message = error_message[:self.MAX_COMPILE_ERROR_BYTES]
+            if len(error_message) > MAX_COMPILE_ERROR_BYTES:
+                error_message = error_message[:MAX_COMPILE_ERROR_BYTES]
 
             self.cleanup()
             raise CompileError(

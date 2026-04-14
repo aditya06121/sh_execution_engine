@@ -2,36 +2,36 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 
 export const options = {
-  vus: 20,
-  duration: "60s",
+  scenarios: {
+    ramping_load: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "1m", target: 20 },
+        { duration: "1m", target: 40 },
+        { duration: "1m", target: 60 },
+        { duration: "1m", target: 80 },
+        { duration: "1m", target: 100 },
+        { duration: "1m", target: 120 },
+        { duration: "1m", target: 140 },
+        { duration: "1m", target: 150 }, // final step adjusted
+      ],
+      gracefulRampDown: "30s",
+    },
+  },
 };
 
+const url = "http://103.173.99.217:8000/execute";
+
 const payload = JSON.stringify({
-  language: "java",
+  language: "csharp",
   source_code:
-    "class Solution { public int[] twoSum(int[] nums, int target) { HashMap<Integer,Integer> map = new HashMap<>(); for (int i =0;i<nums.length;i++) { int x = target - nums[i]; if(map.containsKey(x)){ return new int[] {map.get(x),i}; } map.put(nums[i],i); } return new int[] {}; } }",
-  function_name: "twoSum",
+    "public class Solution { public int Add(int a, int b) { return a + b; } }",
+  function_name: "Add",
   test_cases: [
     {
-      input: {
-        nums: [2, 7, 11, 15],
-        target: 9,
-      },
-      expected_output: [0, 1],
-    },
-    {
-      input: {
-        nums: [3, 2, 4],
-        target: 6,
-      },
-      expected_output: [1, 2],
-    },
-    {
-      input: {
-        nums: [3, 3],
-        target: 6,
-      },
-      expected_output: [0, 1],
+      input: { a: 2, b: 3 },
+      expected_output: 5,
     },
   ],
 });
@@ -43,7 +43,7 @@ const params = {
 };
 
 export default function () {
-  const res = http.post("http://localhost:8000/execute", payload, params);
+  const res = http.post(url, payload, params);
 
   check(res, {
     "status is 200": (r) => r.status === 200,

@@ -15,9 +15,13 @@ from execution.sandbox_paths import (
 )
 from config.limits import (
     EXECUTION_TIMEOUT_SECONDS,
+    DOCKER_MEMORY_LIMIT,
+    DOCKER_CPU_LIMIT,
     DOCKER_PIDS_LIMIT,
     DOCKER_NOFILE_LIMIT,
     MAX_STDOUT_BYTES,
+    CONTAINER_SLEEP_SECONDS,
+    COMPILATION_TIMEOUT_SECONDS,
 )
 
 from .kotlin_wrapper import KOTLIN_WRAPPER_TEMPLATE
@@ -26,10 +30,6 @@ from .kotlin_wrapper import KOTLIN_WRAPPER_TEMPLATE
 class KotlinExecutor(BaseExecutor):
 
     IMAGE_NAME = "java-sandbox:latest"  # same image (has kotlinc + JDK)
-    COMPILATION_TIMEOUT_SECONDS = 120
-    KOTLIN_CPU_LIMIT = "4.0"
-    KOTLIN_MEMORY_LIMIT = "1536m"
-    KOTLIN_CONTAINER_SLEEP_SECONDS = 60
 
     def __init__(self, code: str, function_name: str):
         super().__init__(code, function_name)
@@ -66,9 +66,9 @@ class KotlinExecutor(BaseExecutor):
             "-d",
             "--rm",
 
-            "--memory", self.KOTLIN_MEMORY_LIMIT,
-            "--memory-swap", self.KOTLIN_MEMORY_LIMIT,
-            "--cpus", self.KOTLIN_CPU_LIMIT,
+            "--memory", DOCKER_MEMORY_LIMIT,
+            "--memory-swap", DOCKER_MEMORY_LIMIT,
+            "--cpus", DOCKER_CPU_LIMIT,
             "--pids-limit", DOCKER_PIDS_LIMIT,
             "--ulimit", f"nofile={DOCKER_NOFILE_LIMIT}:{DOCKER_NOFILE_LIMIT}",
 
@@ -80,7 +80,7 @@ class KotlinExecutor(BaseExecutor):
             "-w", "/app",
 
             self.IMAGE_NAME,
-            "sleep", str(self.KOTLIN_CONTAINER_SLEEP_SECONDS)
+            "sleep", str(CONTAINER_SLEEP_SECONDS)
         ]
 
         try:
@@ -109,7 +109,7 @@ class KotlinExecutor(BaseExecutor):
                 compile_cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.COMPILATION_TIMEOUT_SECONDS
+                timeout=COMPILATION_TIMEOUT_SECONDS
             )
         except subprocess.TimeoutExpired:
             raise CompileError("Compilation timed out")
