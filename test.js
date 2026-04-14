@@ -5,12 +5,12 @@ import { Rate, Trend, Counter } from "k6/metrics";
 // ---------------------------------------------------------------------------
 // Custom metrics
 // ---------------------------------------------------------------------------
-const failureRate    = new Rate("failures");
-const e2eLatency     = new Trend("e2e_latency_ms",    true); // submit → verdict
-const submitLatency  = new Trend("submit_latency_ms", true); // just the POST /execute
-const pollCount      = new Trend("poll_count");              // how many polls per job
-const jobsTimedOut   = new Counter("jobs_timed_out");        // jobs that never finished in time
-const jobsExpired    = new Counter("jobs_expired");          // jobs the server marked expired
+const failureRate = new Rate("failures");
+const e2eLatency = new Trend("e2e_latency_ms", true); // submit → verdict
+const submitLatency = new Trend("submit_latency_ms", true); // just the POST /execute
+const pollCount = new Trend("poll_count"); // how many polls per job
+const jobsTimedOut = new Counter("jobs_timed_out"); // jobs that never finished in time
+const jobsExpired = new Counter("jobs_expired"); // jobs the server marked expired
 
 // ---------------------------------------------------------------------------
 // Scenario
@@ -24,13 +24,13 @@ const jobsExpired    = new Counter("jobs_expired");          // jobs the server 
 export const options = {
   scenarios: {
     constant_rps: {
-      executor:        "constant-arrival-rate",
-      rate:            50,          // iterations per second
-      timeUnit:        "1s",
-      duration:        "5m",        // submit phase
+      executor: "constant-arrival-rate",
+      rate: 50, // iterations per second
+      timeUnit: "1s",
+      duration: "5m", // submit phase
       preAllocatedVUs: 800,
-      maxVUs:          2500,
-      gracefulStop:    "2m",        // headroom for in-flight polls to finish
+      maxVUs: 2500,
+      gracefulStop: "2m", // headroom for in-flight polls to finish
     },
   },
   thresholds: {
@@ -51,15 +51,15 @@ export const options = {
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const BASE_URL     = "http://103.173.99.217:8000";
-const POLL_INTERVAL_MS = 500;          // poll every 500 ms
-const MAX_POLL_SECONDS = 110;          // give up after this many seconds of polling
-                                       // (keeps well inside the 2-min gracefulStop)
-const MAX_POLLS    = Math.floor((MAX_POLL_SECONDS * 1000) / POLL_INTERVAL_MS);
+const BASE_URL = "http://103.173.99.217:8000";
+const POLL_INTERVAL_MS = 500; // poll every 500 ms
+const MAX_POLL_SECONDS = 110; // give up after this many seconds of polling
+// (keeps well inside the 2-min gracefulStop)
+const MAX_POLLS = Math.floor((MAX_POLL_SECONDS * 1000) / POLL_INTERVAL_MS);
 
 const SUBMIT_PARAMS = {
   headers: { "Content-Type": "application/json" },
-  timeout: "120s",  // allow for synchronous fallback execution (Redis-down path)
+  timeout: "120s", // allow for synchronous fallback execution (Redis-down path)
 };
 
 const POLL_PARAMS = {
@@ -73,9 +73,7 @@ const PAYLOAD = JSON.stringify({
     "while(fast && fast->next){ slow=slow->next; fast=fast->next->next; " +
     "if(slow==fast) return true;} return false; }",
   function_name: "hasCycle",
-  test_cases: [
-    { input: { head: [1, 2, 3, 4] }, expected_output: false },
-  ],
+  test_cases: [{ input: { head: [1, 2, 3, 4] }, expected_output: false }],
 });
 
 // ---------------------------------------------------------------------------
@@ -99,20 +97,23 @@ export default function () {
     pollCount.add(0);
 
     let body;
-    try { body = JSON.parse(submitRes.body); } catch (_) {
+    try {
+      body = JSON.parse(submitRes.body);
+    } catch (_) {
       failureRate.add(1);
       return;
     }
 
     const verdict = body.verdict ?? null;
-    if (verdict === "error" &&
-        (body.error_message ?? "").includes("expired")) {
+    if (verdict === "error" && (body.error_message ?? "").includes("expired")) {
       jobsExpired.add(1);
     }
-
-    const success = check({ verdict }, {
-      "verdict accepted": (v) => v.verdict === "accepted",
-    });
+    const success = check(
+      { verdict },
+      {
+        "verdict accepted": (v) => v.verdict === "accepted",
+      },
+    );
     failureRate.add(!success);
     return;
   }
@@ -146,7 +147,7 @@ export default function () {
   // ------------------------------------------------------------------
   // 3. Poll until done
   // ------------------------------------------------------------------
-  let polls   = 0;
+  let polls = 0;
   let verdict = null;
   let timedOut = true;
 
@@ -159,15 +160,21 @@ export default function () {
     if (r.status !== 200) continue;
 
     let body;
-    try { body = JSON.parse(r.body); } catch (_) { continue; }
+    try {
+      body = JSON.parse(r.body);
+    } catch (_) {
+      continue;
+    }
 
     if (body.status === "done") {
-      verdict  = body.result?.verdict ?? null;
+      verdict = body.result?.verdict ?? null;
       timedOut = false;
 
       // Track server-side job expiry separately
-      if (verdict === "error" &&
-          (body.result?.error_message ?? "").includes("expired")) {
+      if (
+        verdict === "error" &&
+        (body.result?.error_message ?? "").includes("expired")
+      ) {
         jobsExpired.add(1);
       }
       break;
@@ -186,9 +193,12 @@ export default function () {
   // ------------------------------------------------------------------
   // 4. Validate verdict
   // ------------------------------------------------------------------
-  const success = check({ verdict }, {
-    "verdict accepted": (v) => v.verdict === "accepted",
-  });
+  const success = check(
+    { verdict },
+    {
+      "verdict accepted": (v) => v.verdict === "accepted",
+    },
+  );
 
   failureRate.add(!success);
 }
