@@ -45,11 +45,15 @@ async def mark_running(job_id: str) -> None:
 
 async def mark_done(job_id: str, result: dict) -> None:
     r = get_redis()
-    await r.set(
+    pipe = r.pipeline()
+    pipe.set(
         f"{JOB_PREFIX}{job_id}",
         json.dumps({"status": "done", "result": result}),
         ex=RESULT_TTL,
     )
+    pipe.lpush(f"{JOB_PREFIX}result:{job_id}", json.dumps(result))
+    pipe.expire(f"{JOB_PREFIX}result:{job_id}", RESULT_TTL)
+    await pipe.execute()
 
 
 async def get_job_status(job_id: str) -> dict | None:
@@ -57,6 +61,15 @@ async def get_job_status(job_id: str) -> dict | None:
     val = await r.get(f"{JOB_PREFIX}{job_id}")
     if val is None:
         return None
+    return json.loads(val)
+
+
+async def wait_for_job_result(job_id: str, timeout: int) -> dict | None:
+    r = get_redis()
+    res = await r.blpop(f"{JOB_PREFIX}result:{job_id}", timeout=timeout)
+    if not res:
+        return None
+    _, val = res
     return json.loads(val)
 
 

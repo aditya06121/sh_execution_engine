@@ -56,25 +56,18 @@ async def execute(req: ExecuteRequest):
         log.warning("Redis unavailable (%s), falling back to direct execution", exc)
         return await _execute_direct(req)
 
-    # Internal poll — invisible to the caller
-    elapsed = 0.0
-    while elapsed < _EXECUTE_TIMEOUT:
-        await asyncio.sleep(_POLL_INTERVAL)
-        elapsed += _POLL_INTERVAL
+    from jobqueue.job import wait_for_job_result
+    # Internal wait using redis blpop — invisible to the caller
+    try:
+        result = await wait_for_job_result(job_id, timeout=_EXECUTE_TIMEOUT)
+    except _REDIS_ERRORS as exc:
+        log.warning("Redis unavailable while waiting for job %s: %s", job_id, exc)
+        raise HTTPException(status_code=503, detail="Result store unavailable")
 
-        try:
-            data = await get_job_status(job_id)
-        except _REDIS_ERRORS as exc:
-            log.warning("Redis unavailable while waiting for job %s: %s", job_id, exc)
-            raise HTTPException(status_code=503, detail="Result store unavailable")
+    if result is None:
+        raise HTTPException(status_code=504, detail="Execution timed out")
 
-        if data is None:
-            raise HTTPException(status_code=404, detail="Job not found — it may have expired")
-
-        if data.get("status") == "done":
-            return JSONResponse(status_code=200, content=data["result"])
-
-    raise HTTPException(status_code=504, detail="Execution timed out")
+    return JSONResponse(status_code=200, content=result)
 
 
 async def _execute_direct(req: ExecuteRequest) -> JSONResponse:
