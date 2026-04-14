@@ -7,11 +7,11 @@ TS_COMPILE_TIMEOUT_SECONDS = 15       # was 30
 
 # Docker resource limits
 # Reduced: allows 4× more containers on the same host
-DOCKER_MEMORY_LIMIT = "512m"          # was 256m; cc1plus needs ~300-500 MB for C++
-DOCKER_MEMORY_SWAP = "512m"           # match limit (no extra swap)
-DOCKER_CPU_LIMIT = "0.5"              # was 2
-DOCKER_PIDS_LIMIT = "64"              # was 1536  (typical solutions need <20)
-DOCKER_NOFILE_LIMIT = "1024"          # was 65535
+DOCKER_MEMORY_LIMIT = "1024m"         # was 512m; rustc requires more memory for serde
+DOCKER_MEMORY_SWAP = "1024m"
+DOCKER_CPU_LIMIT = "2"                # was 0.5; g++ compilation needs more CPU
+DOCKER_PIDS_LIMIT = "64"
+DOCKER_NOFILE_LIMIT = "1024"
 
 TS_CPU_LIMIT = "0.5"                  # was 2
 
