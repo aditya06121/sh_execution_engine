@@ -55,4 +55,10 @@ class ExecutionPipeline:
 
         finally:
             if self.executor:
-                await self.executor.cleanup()
+                import asyncio
+                try:
+                    # Run cleanup shielded so that even if the request/worker cancels,
+                    # the docker rm -f command finishes successfully in the background.
+                    await asyncio.shield(self.executor.cleanup())
+                except asyncio.CancelledError:
+                    pass
