@@ -83,7 +83,13 @@ class CppExecutor(BaseExecutor):
         ]
 
         proc = await asyncio.create_subprocess_exec(*run_cmd, stdout=PIPE, stderr=PIPE)
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeExecutionError("Docker daemon timed out and hung while starting the container")
+            
         if proc.returncode != 0:
             raise RuntimeExecutionError("Failed to start C++ container")
         self.container_id = stdout.decode().strip()
@@ -151,7 +157,13 @@ class CppExecutor(BaseExecutor):
                 "docker", "rm", "-f", self.container_id,
                 stdout=DEVNULL, stderr=DEVNULL,
             )
-            await proc.wait()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                # Docker daemon is frozen; we abandon waiting to prevent deadlocking the worker slot
+                proc.kill()
+                await proc.wait()
+                
             self.container_id = None
 
         if self.temp_dir:

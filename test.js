@@ -10,7 +10,7 @@ export const options = {
   scenarios: {
     constant_rps: {
       executor: "constant-arrival-rate",
-      rate: 200, 
+      rate: 100, 
       timeUnit: "1s",
       duration: "5s", 
       preAllocatedVUs: 1000,
@@ -20,8 +20,8 @@ export const options = {
   },
   thresholds: {
     failures: ["rate<0.05"],
-    e2e_latency_ms: ["p(90)<60000"],
-    "e2e_latency_ms{p:99}": ["p(99)<120000"],
+    e2e_latency_ms: ["p(90)<36000"],
+    "e2e_latency_ms{p:99}": ["p(99)<36000"],
   },
 };
 
