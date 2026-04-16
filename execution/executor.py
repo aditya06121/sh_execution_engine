@@ -15,8 +15,8 @@ class ExecutorFactory:
 
     _registry = {
         "python": PythonExecutor,
-        "js": JavaScriptExecutor,
-        "ts": TypeScriptExecutor,
+        "javascript": JavaScriptExecutor,
+        "typescript": TypeScriptExecutor,
         "java": JavaExecutor,
         "kotlin": KotlinExecutor,
         "csharp": CSharpExecutor,

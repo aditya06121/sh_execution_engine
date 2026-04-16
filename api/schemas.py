@@ -27,13 +27,13 @@ class TestCase(StrictBaseModel):
 class ExecuteRequest(StrictBaseModel):
     language: Literal[
         "python",
-        "js",
+        "javascript",
         "c",
         "java",
         "kotlin",
         "go",
         "rust",
-        "ts",
+        "typescript",
         "cpp",
         "csharp",
     ]
