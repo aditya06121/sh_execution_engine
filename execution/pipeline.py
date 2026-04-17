@@ -38,13 +38,13 @@ class ExecutionPipeline:
         LANG_CONFIG = {
             "python": {"image": "python-sandbox:latest", "ext": ".py", "cmd": ["python3", "main.py"]},
             "javascript": {"image": "js-sandbox:latest", "ext": ".js", "cmd": ["node", "main.js"]},
-            "c": {"image": "c-sandbox:latest", "ext": ".c", "cmd": ["sh", "-c", 'gcc -O2 main.c -o main && ./main "$@"', "sh"]},
+            "c": {"image": "cpp-sandbox:latest", "ext": ".c", "cmd": ["sh", "-c", 'gcc -O2 main.c -o main && ./main "$@"', "sh"]},
             "cpp": {"image": "cpp-sandbox:latest", "ext": ".cpp", "cmd": ["sh", "-c", 'g++ -O2 main.cpp -o main && ./main "$@"', "sh"]},
             "java": {"image": "java-sandbox:latest", "ext": ".java", "cmd": ["sh", "-c", 'javac Main.java && java Main "$@"', "sh"]},
-            "kotlin": {"image": "kotlin-sandbox:latest", "ext": ".kt", "cmd": ["sh", "-c", 'kotlinc main.kt -include-runtime -d main.jar && java -jar main.jar "$@"', "sh"]},
+            "kotlin": {"image": "java-sandbox:latest", "ext": ".kt", "cmd": ["sh", "-c", 'kotlinc main.kt -include-runtime -d main.jar && java -jar main.jar "$@"', "sh"]},
             "go": {"image": "go-sandbox:latest", "ext": ".go", "cmd": ["sh", "-c", 'go build -o main main.go && ./main "$@"', "sh"]},
             "rust": {"image": "rust-sandbox:latest", "ext": ".rs", "cmd": ["sh", "-c", 'rustc main.rs -o main && ./main "$@"', "sh"]},
-            "typescript": {"image": "ts-sandbox:latest", "ext": ".ts", "cmd": ["sh", "-c", 'tsc main.ts && node main.js "$@"', "sh"]},
+            "typescript": {"image": "js-sandbox:latest", "ext": ".ts", "cmd": ["sh", "-c", 'tsc main.ts && node main.js "$@"', "sh"]},
             "csharp": {"image": "csharp-sandbox:latest", "ext": ".cs", "cmd": ["sh", "-c", 'echo \'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup></Project>\' > main.csproj && dotnet run -- "$@"', "sh"]},
         }
 
