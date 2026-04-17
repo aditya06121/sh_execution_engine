@@ -94,3 +94,31 @@ ExecuteResponse = Union[
     TimeoutResponse,
     ErrorResponse,
 ]
+
+
+# -------------------------
+# Raw Execute Request Model
+# -------------------------
+
+class RawExecuteRequest(StrictBaseModel):
+    language: Literal[
+        "python",
+        "javascript",
+        "c",
+        "java",
+        "kotlin",
+        "go",
+        "rust",
+        "typescript",
+        "cpp",
+        "csharp",
+    ]
+    source_code: str = Field(..., min_length=1, max_length=50000)
+    stdin: str = Field("", max_length=10000)
+    args: List[str] = Field(default_factory=list, max_length=100)
+
+
+class RawExecuteResponse(StrictBaseModel):
+    stdout: str
+    stderr: str
+    exit_code: int
